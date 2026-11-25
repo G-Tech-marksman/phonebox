@@ -535,9 +535,18 @@ class AgentLink(private val context: Context) {
          */
         val check: String get() = fingerprint.take(8).uppercase().chunked(4).joinToString(" ")
 
+        /** Uses [hosts] and/or [port] when the user typed an override after pasting a pairing link. */
+        fun withEndpoint(hosts: List<String>? = null, port: Int? = null): PairLink {
+            val nextHosts = hosts?.map { it.trim() }?.filter { isAllowedHost(it) }?.take(8)?.takeIf { it.isNotEmpty() } ?: this.hosts
+            val nextPort = port?.takeIf { it in 1..65535 } ?: this.port
+            return if (nextHosts == this.hosts && nextPort == this.port) this else PairLink(pc, fingerprint, nextPort, nextHosts, code)
+        }
+
         companion object {
             private val FINGERPRINT = Regex("^[0-9a-f]{64}$")
             private val CODE = Regex("^[A-Za-z0-9_-]{16,64}$")
+            // DNS / Tailscale MagicDNS name the user typed; QR links still only advertise private IPv4 (see isLocalAddress).
+            private val HOSTNAME = Regex("^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$")
 
             /**
              * Only the addresses the agent offers: private network (10/8, 172.16/12, 192.168/16) and Tailscale
@@ -551,30 +560,116 @@ class AgentLink(private val context: Context) {
             }
 
             /**
-             * Reads https://ersinkoc.github.io/phonebox/pair/#v=1&... (the QR code; the data is in the fragment so it
-             * never reaches a web server) or phonebox://pair?v=1&... (the "Open in PhoneBox" button on that page).
-             * Anything malformed returns null.
+             * Hosts the user may type for manual pairing: the agent's private/Tailscale IPv4, or a DNS name
+             * (for example a Tailscale MagicDNS name). Rejects bare "localhost" and public-looking dotted quads.
              */
-            fun parse(uri: Uri?): PairLink? {
-                if (uri == null) return null
-                val raw = when {
-                    uri.scheme == "https" && uri.host == "ersinkoc.github.io" && uri.path?.startsWith("/phonebox/pair") == true -> uri.encodedFragment
-                    uri.scheme == "phonebox" && uri.host == "pair" -> uri.encodedQuery
-                    else -> null
-                } ?: return null
-                val q = raw.split('&').mapNotNull { part ->
+            fun isAllowedHost(host: String): Boolean {
+                val h = host.trim()
+                if (h.isEmpty() || h.equals("localhost", ignoreCase = true)) return false
+                if (isLocalAddress(h)) return true
+                // a dotted quad that isLocalAddress rejected is a public or malformed IPv4 — do not accept it as DNS
+                if (h.split('.').size == 4 && h.split('.').all { it.toIntOrNull() != null }) return false
+                return HOSTNAME.matches(h)
+            }
+
+            /**
+             * Builds a pairing from the fields the user typed (host, the agent's Wi-Fi port, certificate fingerprint
+             * and one-time code from Settings › Wi-Fi & Tailscale › Pair a phone over Wi-Fi). Null when anything is
+             * missing or rejected.
+             */
+            fun fromFields(host: String, port: Int, fingerprint: String, code: String, pc: String = ""): PairLink? {
+                if (!isAllowedHost(host) || port !in 1..65535) return null
+                val fp = fingerprint.trim().lowercase().takeIf { FINGERPRINT.matches(it) } ?: return null
+                val c = code.trim().takeIf { CODE.matches(it) } ?: return null
+                val name = pc.filter { it >= ' ' }.take(64).ifBlank { "your computer" }
+                return PairLink(name, fp, port, listOf(host.trim()), c)
+            }
+
+            /**
+             * Reads the query/fragment payload (`v=1&fp=…&port=…&h=…&c=…`). Used by [parse] for both QR intents and a
+             * pasted pairing link. Anything malformed returns null.
+             */
+            fun parseQuery(raw: String?): PairLink? {
+                if (raw.isNullOrBlank()) return null
+                val q = raw.trim().removePrefix("#").split('&').mapNotNull { part ->
                     val i = part.indexOf('=')
-                    if (i <= 0) null else part.substring(0, i) to Uri.decode(part.substring(i + 1))
+                    // java.net.URLDecoder (not android.net.Uri.decode) so JVM unit tests can run without Android stubs
+                    if (i <= 0) null else part.substring(0, i) to java.net.URLDecoder.decode(part.substring(i + 1).replace("+", "%2B"), Charsets.UTF_8.name())
                 }.toMap()
                 if (q["v"] != "1") return null
                 val fp = q["fp"]?.lowercase()?.takeIf { FINGERPRINT.matches(it) } ?: return null
                 val port = q["port"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
                 val code = q["c"]?.takeIf { CODE.matches(it) } ?: return null
+                // QR / copied links only carry private IPv4; a pasted link with a user-typed hostname uses fromFields.
                 val hosts = q["h"].orEmpty().split(',').map { it.trim() }.filter { isLocalAddress(it) }.take(8)
                 if (hosts.isEmpty()) return null
                 val pc = q["pc"].orEmpty().filter { it >= ' ' }.take(64).ifBlank { "your computer" }
                 return PairLink(pc, fp, port, hosts, code)
             }
+
+            /** Path of the agent-served landing page or a GitHub Pages mirror under /phonebox/pair. */
+            fun isPairHttpPath(path: String?): Boolean {
+                if (path.isNullOrEmpty()) return false
+                return path == "/pair" || path == "/pair/" || path.startsWith("/pair/") || path.startsWith("/phonebox/pair")
+            }
+
+            /**
+             * Hosts allowed for an https pairing landing page: this PC's private/Tailscale address (agent-served
+             * /pair/), or this fork's GitHub Pages. Owner github.io is not used for new links.
+             */
+            fun isPairHttpHost(host: String?): Boolean {
+                if (host.isNullOrBlank()) return false
+                if (isLocalAddress(host)) return true
+                return host.equals("g-tech-marksman.github.io", ignoreCase = true)
+            }
+
+            /**
+             * Reads phonebox://pair?v=1&… (QR / Copy), or https://&lt;this-pc&gt;:&lt;port&gt;/pair/#v=1&…
+             * (landing page served by the agent). Secrets in a fragment never reach a web server.
+             */
+            fun parse(uri: Uri?): PairLink? {
+                if (uri == null) return null
+                val raw = when {
+                    uri.scheme == "phonebox" && uri.host == "pair" -> uri.encodedQuery
+                    uri.scheme == "https" && isPairHttpHost(uri.host) && isPairHttpPath(uri.path) -> uri.encodedFragment
+                    else -> null
+                } ?: return null
+                return parseQuery(raw)
+            }
+
+            /**
+             * A pasted pairing URL, `phonebox://pair?…`, agent https /pair/#…, or the raw `v=1&fp=…` payload.
+             */
+            fun parse(text: String?): PairLink? {
+                if (text.isNullOrBlank()) return null
+                val trimmed = text.trim()
+                parse(Uri.parse(trimmed))?.let { return it }
+                // fragment-only paste ("#v=1&…" or "v=1&…") after Copy / share without the page URL
+                if (trimmed.contains("fp=") && (trimmed.contains("v=1") || trimmed.startsWith("#")))
+                    return parseQuery(trimmed)
+                return null
+            }
+        }
+    }
+
+    /**
+     * Updates the Wi-Fi address/port of an already-paired computer (same certificate fingerprint). The token stays;
+     * this only retargets where the phone connects after the PC's listen port or advertised host changed. False when
+     * that fingerprint is not stored.
+     */
+    fun updateEndpoint(fingerprint: String, hosts: List<String>, port: Int): Boolean {
+        val id = fingerprint.trim().lowercase()
+        val nextHosts = hosts.map { it.trim() }.filter { PairLink.isAllowedHost(it) }.take(8)
+        if (id.isEmpty() || nextHosts.isEmpty() || port !in 1..65535) return false
+        synchronized(pcsLock) {
+            if (closed || pcs.none { it.id == id }) return false
+            savePcs(pcs.map {
+                if (it.id == id) Pc(it.id, it.name, nextHosts, port, it.token, it.macs) else it
+            }, id)
+            factory = null
+            preferredHost = 0
+            trackpadSocket.close()
+            return true
         }
     }
 
@@ -606,8 +701,10 @@ class AgentLink(private val context: Context) {
                 }
                 val j = JSONObject(c.inputStream.bufferedReader().readText())
                 if (!j.optString("fingerprint").equals(link.fingerprint, ignoreCase = true)) return PairFailure.WrongCertificate(link.pc)
-                val hosts = j.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.getString(it) } }
-                    ?.filter { PairLink.isLocalAddress(it) }?.takeIf { it.isNotEmpty() } ?: link.hosts
+                // keep any host the user typed (MagicDNS, a specific address) first; then the agent's private IPv4 list
+                val fromAgent = j.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.getString(it) } }
+                    ?.filter { PairLink.isLocalAddress(it) } ?: emptyList()
+                val hosts = (link.hosts + fromAgent).distinct().take(8).ifEmpty { link.hosts }
                 // the name the user confirmed; only an entry for this very certificate is replaced, never one that
                 // merely has the same name
                 val reportedMacs = WakePacket.macsFrom(j.optJSONArray("macs"))

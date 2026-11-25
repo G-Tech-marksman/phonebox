@@ -274,9 +274,10 @@ app.Use(async (ctx, next) =>
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
-        if (access is Lan.LanAccess.PairingClaim or Lan.LanAccess.Webhook)
+        if (access is Lan.LanAccess.PairingClaim or Lan.LanAccess.Webhook or Lan.LanAccess.PairPage)
         {
-            // pairing claims and webhooks must not touch phone registry, app version or "phone connected" updates
+            // pairing claims, webhooks and the static /pair landing page must not touch phone registry, app version or
+            // "phone connected" updates
             if (access == Lan.LanAccess.PairingClaim)
                 ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = 1024;
             ctx.Response.Headers.CacheControl = "no-store";
@@ -345,12 +346,20 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
     var (code, expiresAt, attempt) = codes.Start(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     var hosts = Lan.Addresses();
     var fingerprint = Lan.Fingerprint(lanCert);
-    var link = PairingCodes.Link(Environment.MachineName, fingerprint, lanCfg.Port, hosts, code);
-    var apk = $"https://github.com/ersinkoc/phonebox/releases/download/v{AppPaths.Version}/PhoneBox-{AppPaths.Version}.apk";
+    var pc = Environment.MachineName;
+    // App deep link for the QR / Copy button — no third-party GitHub Pages hop.
+    var link = PairingCodes.Link(pc, fingerprint, lanCfg.Port, hosts, code);
+    // Optional https landing page on this agent (same Wi-Fi port) when a camera needs an https:// URL.
+    var pageLink = hosts.Count > 0
+        ? PairingCodes.PageLink(hosts[0], lanCfg.Port, pc, fingerprint, lanCfg.Port, hosts, code)
+        : null;
+    var repo = cfg.Get().Updates.Repo;
+    if (string.IsNullOrWhiteSpace(repo)) repo = "G-Tech-marksman/phonebox";
+    var apk = $"https://github.com/{repo}/releases/download/v{AppPaths.Version}/PhoneBox-{AppPaths.Version}.apk";
     return Results.Json(new
     {
         enabled = true,
-        pc = Environment.MachineName,
+        pc,
         hosts,
         port = lanCfg.Port,
         expiresAt,
@@ -358,6 +367,7 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
         attempt,
         check = PairingCodes.Check(fingerprint),
         link,
+        pageLink,
         qr = PairingCodes.Svg(link),
         app = apk,
         appQr = PairingCodes.Svg(apk),
@@ -393,6 +403,17 @@ app.MapPost("/api/restart", (IHostApplicationLifetime life) =>
 });
 
 // ---------------------------------------------------------------- settings UI (browser)
+// Pairing landing page (fragment holds the one-time payload). Local settings port and Wi-Fi HTTPS both serve it.
+IResult PairLandingPage()
+{
+    using var s = AppPaths.Resource("pair.html")!;
+    using var r = new StreamReader(s);
+    return Results.Content(r.ReadToEnd(), "text/html; charset=utf-8");
+}
+app.MapGet("/pair", PairLandingPage);
+app.MapGet("/pair/", PairLandingPage);
+app.MapGet("/pair/index.html", PairLandingPage);
+
 app.MapGet("/", () =>
 {
     using var s = AppPaths.Resource("settings.html")!;

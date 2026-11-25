@@ -107,16 +107,25 @@ public static class Lan
     /// </summary>
     public static bool IsPairingClaim(string method, PathString path) => method == "POST" && path == "/api/pair/claim";
 
+    /// <summary>
+    /// Static pairing landing page on this agent (secrets stay in the URL fragment and never reach the server).
+    /// Served without the phone key so a camera can open <c>https://&lt;pc&gt;:&lt;port&gt;/pair/#…</c> before pairing.
+    /// </summary>
+    public static bool IsPairPage(string method, PathString path) =>
+        HttpMethods.IsGet(method) && (path == "/pair" || path == "/pair/" || path == "/pair/index.html");
+
     /// <summary>The webhook API: other machines on the network (or Tailscale) may push data with the same token.</summary>
     public static bool IsWebhook(PathString path) =>
         path.StartsWithSegments("/api/push") || path.StartsWithSegments("/api/notify")
         || path.StartsWithSegments("/api/goto") || path.StartsWithSegments("/api/refresh");
 
-    internal enum LanAccess { Denied, Phone, Webhook, PairingClaim }
+    internal enum LanAccess { Denied, Phone, Webhook, PairingClaim, PairPage }
 
     internal static LanAccess AuthorizeRequest(LanConfig lan, string method, PathString path, string origin, string? authorization, string? queryToken)
     {
-        if (!lan.Enabled || origin != "" || !AllowedOverLan(path)) return LanAccess.Denied;
+        if (!lan.Enabled || origin != "") return LanAccess.Denied;
+        if (IsPairPage(method, path)) return LanAccess.PairPage;
+        if (!AllowedOverLan(path)) return LanAccess.Denied;
         // A hand-edited config can give both keys the same value. Every webhook sender then holds the phone key too,
         // and the agent cannot tell them apart, so that value is not trusted as a phone key until one of them changes.
         var sharedKey = string.Equals(lan.Token, lan.WebhookToken, StringComparison.Ordinal);

@@ -279,24 +279,32 @@ Wi-Fi is off by default. To turn it on:
 
 1. Open the settings page on the PC: click the tray icon, or go to `http://127.0.0.1:8765` in a browser.
 2. In **General**, scroll down to **Wi-Fi & Tailscale** and turn on **Let the phone connect without the USB cable**.
-3. Click **Save**, then **Restart to apply** at the top of the page. The line next to **Pair a phone over Wi-Fi**
-   says "Listening on port 8766" once it works.
-4. Allow PhoneBox through the firewall when Windows asks.
+3. Set **Port** if you need something other than the default `8766` (for example when that port is already in use).
+   The phone must use the same port when you connect by host or paste a pairing link.
+4. Click **Save**, then **Restart to apply** at the top of the page. The line next to **Pair a phone over Wi-Fi**
+   says "Listening on port …" once it works.
+5. Allow PhoneBox through the firewall when Windows asks (open the chosen TCP port on your local network).
 
-Then pair the phone in one of two ways:
+Then pair the phone in one of these ways:
 
-- **Without a cable:** click **Pair a phone over Wi-Fi**. The window shows a QR code that downloads the app and one
-  that pairs. Scan the second with the phone's camera, open the link and tap **Open in PhoneBox**; the phone asks you
-  to confirm a code that the window also shows. No developer options, USB debugging or adb needed. The QR code holds
-  the PC's addresses, its certificate fingerprint and a one-time code (5 minutes, single use), never the key itself.
-  A phone paired this way only uses Wi-Fi: plugging it into the PC does not wake it or open the panel, there is no
-  USB fallback when Wi-Fi drops, and app updates are installed from the release page instead of over USB.
+- **Without a cable (QR):** click **Pair a phone over Wi-Fi**. The window shows a QR code that downloads the app and one
+  that pairs. The pairing QR opens the PhoneBox app directly (`phonebox://pair?…`) — it does not use a third-party
+  GitHub Pages host. You can also **Copy agent page link** for `https://&lt;pc&gt;:&lt;wifi-port&gt;/pair/#…` served by
+  your own agent. The phone asks you to confirm a code that the window also shows. No developer options, USB debugging
+  or adb needed. The payload holds the PC's addresses, its Wi-Fi port, its certificate fingerprint and a one-time code
+  (5 minutes, single use), never the key itself. A phone paired this way only uses Wi-Fi: plugging it into the PC does
+  not wake it or open the panel, there is no USB fallback when Wi-Fi drops, and app updates are installed from the
+  release page instead of over USB.
+- **Without a cable (link / host):** on the computer use **Copy pairing link** (`phonebox://…`) or **Copy agent page
+  link**, or note the host, port, fingerprint and one-time code from the pairing window. On the phone, while offline,
+  tap **Connect with link or host**, paste the link (optionally override host/port) or enter those fields, then confirm.
+  This uses the same secure claim as the QR.
 - **Over USB:** plug the phone in once.
 
 Either way the phone gets the PC's addresses, a secret key and the fingerprint of the agent's self-signed TLS
 certificate, and trusts only that certificate. With USB, when the cable is unplugged it switches to
-`https://<pc>:8766` automatically and back to USB when it is plugged in again; the status line shows which one it
-uses.
+`https://<pc>:<port>` automatically (the Wi-Fi port from settings) and back to USB when it is plugged in again; the
+status line shows which one it uses.
 
 - The phone and the PC need to be on the same network. If they are not (separate Wi-Fi networks, another
   building…), install [Tailscale](https://tailscale.com) on both: the agent offers its Tailscale address too.

@@ -59,15 +59,27 @@ public sealed class PairingTests
     }
 
     [Fact]
-    public void TheLinkKeepsEverythingInTheFragment()
+    public void TheAppLinkOpensPhoneBoxDirectly()
     {
         var link = PairingCodes.Link("Desk PC & co", "ab12", 8766, ["192.168.1.10", "100.64.0.7"], "CODE_x-1");
         var uri = new Uri(link);
+        Assert.Equal("phonebox", uri.Scheme);
+        Assert.Equal("pair", uri.Host);
+        Assert.Equal("?v=1&pc=Desk%20PC%20%26%20co&fp=ab12&port=8766&h=192.168.1.10,100.64.0.7&c=CODE_x-1", uri.Query);
+        Assert.Equal("", uri.Fragment);
+    }
+
+    [Fact]
+    public void TheAgentPageLinkKeepsSecretsInTheFragment()
+    {
+        var link = PairingCodes.PageLink("192.168.1.10", 9000, "Desk PC & co", "ab12", 9000, ["192.168.1.10", "100.64.0.7"], "CODE_x-1");
+        var uri = new Uri(link);
         Assert.Equal("https", uri.Scheme);
-        Assert.Equal("ersinkoc.github.io", uri.Host);
-        Assert.Equal("/phonebox/pair/", uri.AbsolutePath);
-        Assert.Equal("", uri.Query); // nothing a web server would receive
-        Assert.Equal("#v=1&pc=Desk%20PC%20%26%20co&fp=ab12&port=8766&h=192.168.1.10,100.64.0.7&c=CODE_x-1", uri.Fragment);
+        Assert.Equal("192.168.1.10", uri.Host);
+        Assert.Equal(9000, uri.Port);
+        Assert.Equal("/pair/", uri.AbsolutePath);
+        Assert.Equal("", uri.Query); // nothing the agent receives
+        Assert.Equal("#v=1&pc=Desk%20PC%20%26%20co&fp=ab12&port=9000&h=192.168.1.10,100.64.0.7&c=CODE_x-1", uri.Fragment);
     }
 
     [Fact]
@@ -125,12 +137,14 @@ public sealed class PairingTests
         Assert.Equal(Lan.LanAccess.Webhook, Lan.AuthorizeRequest(enabled, "POST", "/api/push/ci", "", null, "hook-tok"));
         Assert.Equal(Lan.LanAccess.Denied, Lan.AuthorizeRequest(enabled, "GET", "/api/state", "", "Bearer hook-tok", null));
         Assert.Equal(Lan.LanAccess.PairingClaim, Lan.AuthorizeRequest(enabled, "POST", "/api/pair/claim", "", null, null));
+        Assert.Equal(Lan.LanAccess.PairPage, Lan.AuthorizeRequest(enabled, "GET", "/pair/", "", null, null));
         Assert.Equal(Lan.LanAccess.Denied, Lan.AuthorizeRequest(enabled, "GET", "/api/state", "https://evil.example", "Bearer phone-tok", null));
 
         var disabled = new LanConfig { Enabled = false, Port = 8766, Token = "phone-tok", WebhookToken = "hook-tok" };
         Assert.Equal(Lan.LanAccess.Denied, Lan.AuthorizeRequest(disabled, "GET", "/api/state", "", "Bearer phone-tok", null));
         Assert.Equal(Lan.LanAccess.Denied, Lan.AuthorizeRequest(disabled, "POST", "/api/push/ci", "", null, "hook-tok"));
         Assert.Equal(Lan.LanAccess.Denied, Lan.AuthorizeRequest(disabled, "POST", "/api/pair/claim", "", null, null));
+        Assert.Equal(Lan.LanAccess.Denied, Lan.AuthorizeRequest(disabled, "GET", "/pair/", "", null, null));
     }
 
     // Both keys with one value (a hand-edited config): every webhook sender would hold the phone key too.

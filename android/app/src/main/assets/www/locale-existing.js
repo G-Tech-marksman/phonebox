@@ -17,6 +17,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.pair.hosts": "The phone will connect to {hosts} on port {port}. The code works once, for 5 minutes. The QR code does not contain the key.",
       "s.pair.noHosts": "No LAN or Tailscale address was found on this computer, so the phone has nothing to connect to.",
       "s.pair.copy": "Copy the pairing link",
+      "s.pair.copyPage": "Copy agent page link",
+      "s.js.pairPageLinkCopied": "Agent pairing page link copied",
       "s.pair.expired": "Expired. Close and start again.",
       "s.pair.expires": "Expires in {time}.",
       "s.cd.plexConn": "Plex music control",

@@ -313,6 +313,7 @@ public sealed class LanConfig
 {
     /// <summary>Also accept the phone over Wi-Fi (HTTPS + token, paired over USB). Requires an agent restart.</summary>
     public bool Enabled { get; set; }
+    /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale (default 8766). Editable in Settings; Save + Restart to apply. The phone pairing link and manual host+port UI use the same value.</summary>
     public int Port { get; set; } = 8766;
     /// <summary>Shared secret handed to the phone over USB. Empty = generate a new one (forces re-pairing).</summary>
     public string? Token { get; set; }
@@ -324,7 +325,7 @@ public sealed class UpdateConfig
 {
     /// <summary>Install new GitHub releases automatically (phone app over USB, agent in place).</summary>
     public bool Auto { get; set; } = true;
-    public string Repo { get; set; } = "ersinkoc/phonebox";
+    public string Repo { get; set; } = "G-Tech-marksman/phonebox";
 }
 
 public sealed class ClaudeConfig
@@ -870,7 +871,7 @@ public sealed partial class ConfigStore(string path)
         c.OpenCode ??= new();
         c.OpenCode.TimeoutSec = Math.Clamp(c.OpenCode.TimeoutSec, 10, 3600);
         c.OpenCode.AlwaysCountdownSec = Math.Clamp(c.OpenCode.AlwaysCountdownSec, 0, 60);
-        if (string.IsNullOrWhiteSpace(c.Updates.Repo)) c.Updates.Repo = "ersinkoc/phonebox";
+        if (string.IsNullOrWhiteSpace(c.Updates.Repo)) c.Updates.Repo = "G-Tech-marksman/phonebox";
         c.Lan.Port = Math.Clamp(c.Lan.Port, 1024, 65535);
         if (string.IsNullOrWhiteSpace(c.Lan.Token)) c.Lan.Token = NewToken();
         if (string.IsNullOrWhiteSpace(c.Lan.WebhookToken)) c.Lan.WebhookToken = NewToken();

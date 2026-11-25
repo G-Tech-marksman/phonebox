@@ -960,7 +960,7 @@ nav a.on::before { color: var(--accent); }
           The phone and this PC must be on the same network &mdash; or both on <a href="https://tailscale.com" target="_blank" rel="noopener">Tailscale</a>, which also works from another place or across separate Wi-Fi networks.
           Windows Firewall asks once &mdash; allow it (tick the network type Tailscale uses, too).</p>
         <div class="grid2">
-          <div class="field"><label data-i18n="s.wifi.port">Port</label><input type="number" min="1024" max="65535" data-bind="lan.port" data-type="int"></div>
+          <div class="field"><label data-i18n="s.wifi.port">Port</label><input type="number" min="1024" max="65535" data-bind="lan.port" data-type="int" placeholder="8766"><span class="hint" data-i18n="s.wifi.portHint">Default 8766. Change it if that port is taken; Save and Restart to apply. Enter the same port on the phone when connecting by host or pasting a link.</span></div>
           <div class="field"><label data-i18n="s.wifi.addresses">Addresses offered to the phone</label><div id="lanHosts" class="hint">—</div></div>
         </div>
         <div class="row"><button class="btn primary" id="lanPair" data-i18n="s.wifi.pair">Pair a phone over Wi-Fi</button><button class="btn" id="lanRegen" data-i18n="s.wifi.newKey">New key (unpair phones)</button><span class="hint" id="lanStatus"></span></div>
@@ -2378,8 +2378,9 @@ async function pairOverWifi() {
     h('p', { class: 'hint', style: 'margin:0' }, r.hosts.length
       ? t('s.pair.hosts', { hosts: r.hosts.join(', '), port: r.port })
       : t('s.pair.noHosts')),
-    h('div', { class: 'row', style: 'margin-top:8px' },
-      h('button', { class: 'btn sm', onclick: () => { navigator.clipboard?.writeText(r.link); toast(t('s.js.pairLinkCopied')); } }, t('s.pair.copy'))));
+    h('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap;gap:8px' },
+      h('button', { class: 'btn sm', onclick: () => { navigator.clipboard?.writeText(r.link); toast(t('s.js.pairLinkCopied')); } }, t('s.pair.copy')),
+      r.pageLink ? h('button', { class: 'btn sm', onclick: () => { navigator.clipboard?.writeText(r.pageLink); toast(t('s.js.pairPageLinkCopied')); } }, t('s.pair.copyPage')) : null));
   const tick = async () => {
     try {
       const s = await (await fetch('/api/pair/status')).json();
@@ -3905,7 +3906,7 @@ function bindForm() {
       setPath(cfg, p, val);
       $('nbv').textContent = Math.round(cfg.night.brightness * 100) + '%';
       if (p === 'charge.method') renderCharge();
-      if (p === 'lan.enabled') renderLanStatus();
+      if (p === 'lan.enabled' || p === 'lan.port') renderLanStatus();
       if (p === 'photos.source' || p === 'photos.immichUrl' || p === 'photos.immichKey') renderPhotoSource();
       changed();
     };
@@ -3959,10 +3960,13 @@ let lanInfo = null; // the agent's last /api/lan answer
 function renderLanStatus() {
   if (!lanInfo) return;
   const want = !!cfg.lan?.enabled;
+  const nextPort = +(cfg.lan?.port || 0);
+  const portChanging = lanInfo.active && nextPort >= 1024 && nextPort <= 65535 && nextPort !== lanInfo.port;
   $('lanStatus').textContent = want && !lanInfo.configured ? t('s.wifi.saveThenRestart')
     : !want && lanInfo.configured ? t('s.wifi.saveToTurnOff')
     // saved as off: the agent refuses Wi-Fi requests at once, even though the port is only released by a restart
     : !lanInfo.configured ? t('s.wifi.off')
+    : portChanging ? t('s.wifi.portPendingRestart', { listening: lanInfo.port, next: nextPort })
     : lanInfo.active ? t('s.wifi.listening', { port: lanInfo.port }) : t('s.wifi.restartToListen');
 }
 
@@ -4047,7 +4051,7 @@ async function loadInfo() {
 // The form reads every section it binds and renders, so a config without one — an older export, or a
 // hand-trimmed paste in Apply JSON — gets the same defaults a fresh load does before anything renders.
 function fillDefaults() {
-  cfg.pages = fitPages(cfg.pages); cfg.shortcuts ??= []; cfg.rules ??= []; cfg.display ??= {}; cfg.display.wallpaper ??= { dim: 45, blur: 0 }; cfg.night = { enabled: true, start: '00:30', end: '07:30', brightness: 0.02, ...cfg.night }; cfg.weather ??= {}; cfg.weather.unit ??= 'celsius'; cfg.weather.model ??= ''; cfg.photos ??= { source: 'folder', folder: '', subfolders: true, immichUrl: '', immichKey: '', immichAlbum: '', immichAlbumName: '' }; cfg.lan ??= { enabled: false, port: 8766 }; cfg.updates ??= { auto: true, repo: 'ersinkoc/phonebox' }; cfg.claude ??= { phoneApprovals: true, timeoutSec: 90, onlyWhenAway: false, shareSessionTitles: false, shareConversation: false, watchWsl: false }; cfg.claude.extraCredentialDirs ??= []; cfg.opencode ??= { phoneApprovals: false, timeoutSec: 90, onlyWhenAway: false, alwaysCountdownSec: 10, watchWsl: false, shareSessionTitles: false, sessions: false };
+  cfg.pages = fitPages(cfg.pages); cfg.shortcuts ??= []; cfg.rules ??= []; cfg.display ??= {}; cfg.display.wallpaper ??= { dim: 45, blur: 0 }; cfg.night = { enabled: true, start: '00:30', end: '07:30', brightness: 0.02, ...cfg.night }; cfg.weather ??= {}; cfg.weather.unit ??= 'celsius'; cfg.weather.model ??= ''; cfg.photos ??= { source: 'folder', folder: '', subfolders: true, immichUrl: '', immichKey: '', immichAlbum: '', immichAlbumName: '' }; cfg.lan ??= { enabled: false, port: 8766 }; cfg.updates ??= { auto: true, repo: 'G-Tech-marksman/phonebox' }; cfg.claude ??= { phoneApprovals: true, timeoutSec: 90, onlyWhenAway: false, shareSessionTitles: false, shareConversation: false, watchWsl: false }; cfg.claude.extraCredentialDirs ??= []; cfg.opencode ??= { phoneApprovals: false, timeoutSec: 90, onlyWhenAway: false, alwaysCountdownSec: 10, watchWsl: false, shareSessionTitles: false, sessions: false };
   cfg.codexBar ??= { providers: ['claude', 'codex', 'antigravity', 'grok'], rotate: true, pageSize: 2, rotateInterval: 8 };
   for (const [k, v] of Object.entries({ language: 'auto', hour12: false, idleReturnSec: 90, switchCountdownSec: 3, touchGraceSec: 20, minDwellSec: 15, holdMaxMin: 30, keepAwake: true, openOnConnect: true,
     showSeconds: true, weekStart: 'monday', vibrate: true, finishToast: true, finishSound: false, finishSoundVolume: 70, volumeKeys: true, artTint: true, nightWhenUnreachable: false, unreachableNightDelayMin: 5, proximityWake: true, orientation: 'landscape', tabletRows: false, theme: 'default', accent: '#2dd4bf' })) cfg.display[k] ??= v;
@@ -4128,7 +4132,7 @@ $('openPhone').onclick = async () => {
 $('cityBtn').onclick = searchCity;
 function renderUpdate(u) {
   const s = u.status;
-  $('updRepo').textContent = cfg.updates?.repo || 'ersinkoc/phonebox';
+  $('updRepo').textContent = cfg.updates?.repo || 'G-Tech-marksman/phonebox';
   const line = (k, v) => [h('dt', {}, k), h('dd', {}, v)];
   $('updInfo').replaceChildren(
     ...line(t('s.adv.agent'), s.agentVersion + (s.agentUpdate ? ` → ${s.latest}` : ' ' + t('s.adv.upToDate')) + (u.installed ? '' : ' · ' + t('s.adv.notInstalledCopy'))),

@@ -14,6 +14,28 @@
     <string name="pair_failed_answer">%1$s answered %2$d.</string>
     <string name="pair_failed_certificate">The computer has a different certificate than the QR code. Start pairing again.</string>
     <string name="ok">OK</string>
+    <!-- Manual pairing (paste link or host + port + secrets) when the camera cannot open the QR. -->
+    <string name="pair_manual_title">Connect with a link or host</string>
+    <string name="pair_manual_lead">Paste the pairing link from the computer (Settings › Wi-Fi &amp; Tailscale › Pair a phone over Wi-Fi › Copy pairing link), or enter the host, the same Wi-Fi port as on the computer, the certificate fingerprint and the one-time code.</string>
+    <string name="pair_manual_link">Pairing link</string>
+    <string name="pair_manual_link_hint">phonebox://pair?v=1&amp;… or https://&lt;pc&gt;:&lt;port&gt;/pair/#…</string>
+    <string name="pair_manual_or_fields">Or enter host, port and secrets</string>
+    <string name="pair_manual_host">Host / address</string>
+    <string name="pair_manual_host_hint">192.168.1.10 or pc.tailnet.ts.net</string>
+    <string name="pair_manual_port">Port</string>
+    <string name="pair_manual_port_hint">8766</string>
+    <string name="pair_manual_fp">Certificate fingerprint</string>
+    <string name="pair_manual_fp_hint">64 hex characters from the pairing window</string>
+    <string name="pair_manual_code">One-time code</string>
+    <string name="pair_manual_code_hint">From the pairing window (5 minutes, once)</string>
+    <string name="pair_manual_name">Computer name (optional)</string>
+    <string name="pair_manual_name_hint">Shown on this phone</string>
+    <string name="pair_manual_connect">Connect</string>
+    <string name="pair_manual_update">Update address</string>
+    <string name="pair_manual_invalid">Need a full pairing link, or a host, port, fingerprint and one-time code.</string>
+    <string name="pair_manual_update_need">To update an existing pairing, enter the host, port and certificate fingerprint (or paste a link that has the fingerprint).</string>
+    <string name="pair_manual_update_missing">No paired computer matches that fingerprint. Use Connect with a one-time code first.</string>
+    <string name="pair_manual_update_done">Updated the connection address</string>
     <!-- Shown instead of the panel when Android cannot start its WebView (#385). -->
     <string name="webview_failed">The panel can\'t run on this phone: Android could not start its WebView. Some Android 5 phones can\'t run the WebView versions PhoneBox needs.</string>
 </resources>

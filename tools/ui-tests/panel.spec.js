@@ -631,8 +631,9 @@ test('the pairing page hands a checked link to the app and clears it from the ad
   await expect(page.locator('#hosts')).toHaveText('192.168.1.10, 100.64.0.7 (port 8766)');
   await expect(page.locator('#check')).toHaveText('ABAB ABAB');
   const href = await page.locator('#open').getAttribute('href');
+  const fallbackUrl = encodeURIComponent(new URL('/pair/?cannot-open=1', baseURL).href);
   expect(href).toBe(`intent://pair?v=1&pc=Desk%20PC&fp=${fp}&port=8766&h=192.168.1.10%2C100.64.0.7&c=${'A'.repeat(22)}`
-    + '#Intent;scheme=phonebox;package=net.oxog.phonebox.deskpanel;S.browser_fallback_url=https%3A%2F%2Fersinkoc.github.io%2Fphonebox%2Fpair%2F%3Fcannot-open%3D1;end');
+    + `#Intent;scheme=phonebox;package=net.oxog.phonebox.deskpanel;S.browser_fallback_url=${fallbackUrl};end`);
   // the button stays pinned to the app's package; the plain link is a separate choice for browsers that open a store (#175)
   await expect(page.locator('#plainWrap')).toBeVisible();
   expect(await page.locator('#plain').getAttribute('href')).toBe(`phonebox://pair?v=1&pc=Desk%20PC&fp=${fp}&port=8766&h=192.168.1.10%2C100.64.0.7&c=${'A'.repeat(22)}`);
