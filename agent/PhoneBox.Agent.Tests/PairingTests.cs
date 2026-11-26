@@ -94,6 +94,18 @@ public sealed class PairingTests
         Assert.DoesNotContain("<script", svg, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ForkApkDownloadUrlIsTheStablePublicReleaseAsset() =>
+        Assert.Equal(
+            "https://github.com/G-Tech-marksman/phonebox/releases/download/apk-manual-pair-3124/PhoneBox.apk",
+            PairingCodes.ApkDownloadUrl("G-Tech-marksman/phonebox", "0.9.29"));
+
+    [Fact]
+    public void UpstreamApkDownloadUrlUsesSemverAssetName() =>
+        Assert.Equal(
+            "https://github.com/ersinkoc/phonebox/releases/download/v0.9.29/PhoneBox-0.9.29.apk",
+            PairingCodes.ApkDownloadUrl("ersinkoc/phonebox", "0.9.29"));
+
     private static Task<string?> ClaimBody(string? contentType, string body)
     {
         var ctx = new DefaultHttpContext();

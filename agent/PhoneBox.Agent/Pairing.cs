@@ -113,4 +113,17 @@ public sealed class PairingCodes
         using var data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.M);
         return new SvgQRCode(data).GetGraphic(8, "#000000", "#ffffff", drawQuietZones: true);
     }
+
+    /// <summary>
+    /// Public APK URL put in the pairing download QR. This fork publishes a stable asset on the
+    /// <c>apk-manual-pair-3124</c> release (<c>PhoneBox.apk</c>); upstream-style semver names are used otherwise.
+    /// </summary>
+    public static string ApkDownloadUrl(string repo, string version)
+    {
+        repo = repo.Trim().Trim('/');
+        if (repo.Equals("G-Tech-marksman/phonebox", StringComparison.OrdinalIgnoreCase))
+            return "https://github.com/G-Tech-marksman/phonebox/releases/download/apk-manual-pair-3124/PhoneBox.apk";
+        var v = version.Trim().TrimStart('v');
+        return $"https://github.com/{repo}/releases/download/v{v}/PhoneBox-{v}.apk";
+    }
 }

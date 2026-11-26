@@ -356,9 +356,9 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
     var pageLink = pageHost is not null
         ? PairingCodes.PageLink(pageHost, lanCfg.Port, pc, fingerprint, lanCfg.Port, hosts, code)
         : null;
-    var repo = cfg.Get().Updates.Repo;
-    if (string.IsNullOrWhiteSpace(repo)) repo = "G-Tech-marksman/phonebox";
-    var apk = $"https://github.com/{repo}/releases/download/v{AppPaths.Version}/PhoneBox-{AppPaths.Version}.apk";
+    var repo = UpdateService.NormalizeRepo(cfg.Get().Updates.Repo) ?? "G-Tech-marksman/phonebox";
+    // Fork pairing QR must hit a real public asset (semver PhoneBox-<v>.apk is not published on this fork).
+    var apk = PairingCodes.ApkDownloadUrl(repo, AppPaths.Version);
     return Results.Json(new
     {
         enabled = true,
@@ -375,6 +375,9 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
         link,
         pageLink,
         qr = PairingCodes.Svg(link),
+        // Extra QRs for manual pairing: scan the short one-time code or the certificate fingerprint separately.
+        codeQr = PairingCodes.Svg(code),
+        fpQr = PairingCodes.Svg(fingerprint),
         app = apk,
         appQr = PairingCodes.Svg(apk),
     });
