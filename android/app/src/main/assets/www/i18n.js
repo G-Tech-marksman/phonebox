@@ -636,7 +636,7 @@
       's.wifi.title': 'Wi-Fi & Tailscale',
       's.wifi.enable': 'Let the phone connect without the USB cable',
       's.wifi.port': 'Port',
-      's.wifi.portHint': 'Default 1766. Change it if that port is taken; Save and Restart to apply. Enter the same port on the phone when connecting by host or pasting a link.',
+      's.wifi.portHint': 'Fixed at 1766 for this build (older installs are migrated on startup). Pairing QR/link and the phone use this port. This Settings page stays on http://127.0.0.1:8765. For remote access, forward TCP 1766 on your router/VPN to this PC (or use Tailscale).',
       's.wifi.pair': 'Pair a phone over Wi-Fi',
       's.wifi.newKey': 'New key (unpair phones)',
       's.pair.copyPage': 'Copy agent page link',

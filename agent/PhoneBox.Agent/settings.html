@@ -996,7 +996,7 @@ nav a.on::before { color: var(--accent); }
           or put a public IP / DDNS name under <b>Remote hosts to advertise</b> and forward this TCP port to the PC.
           Windows Firewall asks once &mdash; allow it (tick the network type Tailscale uses, too).</p>
         <div class="grid2">
-          <div class="field"><label data-i18n="s.wifi.port">Port</label><input type="number" min="1024" max="65535" data-bind="lan.port" data-type="int" placeholder="1766"><span class="hint" data-i18n="s.wifi.portHint">Default 1766. Change it if that port is taken; Save and Restart to apply. Enter the same port on the phone when connecting by host or pasting a link. For remote access, forward this TCP port on your router to this PC (or use Tailscale — no forward needed).</span></div>
+          <div class="field"><label data-i18n="s.wifi.port">Port</label><input type="number" min="1024" max="65535" data-bind="lan.port" data-type="int" placeholder="1766" readonly><span class="hint" data-i18n="s.wifi.portHint">Fixed at 1766 for this build (older installs are migrated on startup). Pairing QR/link and the phone use this port. This Settings page stays on http://127.0.0.1:8765. For remote access, forward TCP 1766 on your router/VPN to this PC (or use Tailscale).</span></div>
           <div class="field"><label data-i18n="s.wifi.addresses">Addresses offered to the phone</label><div id="lanHosts" class="hint">—</div></div>
         </div>
         <div class="field" style="margin-top:8px">

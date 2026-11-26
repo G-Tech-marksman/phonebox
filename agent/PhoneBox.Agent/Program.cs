@@ -1308,15 +1308,13 @@ public partial class Program
                 collides = false;
                 if (prop.Value.ValueKind != JsonValueKind.Object) continue;
                 var enabled = false;
-                var port = 1766;
                 foreach (var lp in prop.Value.EnumerateObject())
                 {
                     if (lp.Name.Equals("enabled", StringComparison.OrdinalIgnoreCase) && lp.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                         enabled = lp.Value.GetBoolean();
-                    else if (lp.Name.Equals("port", StringComparison.OrdinalIgnoreCase) && lp.Value.ValueKind == JsonValueKind.Number && lp.Value.TryGetInt32(out var p))
-                        port = Math.Clamp(p, 1024, 65535);
                 }
-                collides = enabled && port == localPort;
+                // Normalize always pins lan.port to FixedPort, so collision uses that value.
+                collides = enabled && LanConfig.FixedPort == localPort;
             }
             return collides;
         }

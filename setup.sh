@@ -7,7 +7,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 # With options:
 #   curl -fsSL .../setup.sh | bash -s -- --no-phone
-#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.4
+#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.5
 # Or: export PHONEBOX_REPO=G-Tech-marksman/phonebox
 #
 # Run it as yourself, not with sudo: it asks for sudo only to install packages, and asks first.
@@ -28,6 +28,7 @@ set -euo pipefail
 repo="${PHONEBOX_REPO:-G-Tech-marksman/phonebox}"
 package="net.oxog.phonebox.deskpanel"
 settings_url="http://127.0.0.1:8765"
+lan_port=1766
 
 yes=0; phone=1; serial=""; autostart=1; start=1; extras=1; version=""; dry=0
 tmp=""
@@ -682,9 +683,30 @@ main() {
     fi
   fi
 
+  # Migrate older lan.port (e.g. 8766) to the fixed Wi-Fi listen port before start.
+  if [ "$os" = osx ]; then _cfg="$HOME/Library/Application Support/PhoneBox/config.json"
+  else _cfg="${XDG_CONFIG_HOME:-$HOME/.config}/PhoneBox/config.json"; fi
+  if [ -f "$_cfg" ] && have python3; then
+    if python3 - "$_cfg" "$lan_port" <<'PY'
+import json, sys
+path, port = sys.argv[1], int(sys.argv[2])
+with open(path, encoding="utf-8") as f: data = json.load(f)
+lan = data.setdefault("lan", {})
+prev = lan.get("port")
+if prev == port: raise SystemExit(1)
+lan["port"] = port
+with open(path, "w", encoding="utf-8") as f: json.dump(data, f, indent=2)
+raise SystemExit(0)
+PY
+    then
+      ok "Migrated Wi-Fi listen port → $lan_port in config.json (Settings UI stays at $settings_url)"
+    fi
+  fi
+
   if [ "$start" = 0 ]; then
     step 'Done (not started)'
     info "Start it with $app/PhoneBoxAgent"
+    info "Settings UI: $settings_url · Wi-Fi / pairing listen port: $lan_port"
   else
     step 'Starting PhoneBox'
     start_agent
@@ -695,7 +717,7 @@ main() {
       i=$((i + 1))
     done
     if [ "$up" = 1 ]; then
-      ok "PhoneBox is running: settings at $settings_url"
+      ok "PhoneBox is running: Settings at $settings_url · Wi-Fi / pairing on TCP $lan_port"
       if [ "$os" = osx ]; then open "$settings_url" >/dev/null 2>&1 || true
       elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && have xdg-open; then (xdg-open "$settings_url" >/dev/null 2>&1 &) || true; fi
     else

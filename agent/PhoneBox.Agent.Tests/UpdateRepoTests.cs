@@ -1,3 +1,4 @@
+using System.Text.Json;
 using PhoneBox.Agent;
 using Xunit;
 
@@ -59,5 +60,25 @@ public sealed class LanAdvertiseTests
         Assert.Equal("vpn2-g-tech.tech", hosts[0]);
         Assert.Contains("vpn2-g-tech.tech", hosts);
         Assert.True(hosts.Count <= 8);
+    }
+
+    [Fact]
+    public void PersistGeneratedMigratesLegacyLanPortToFixed1766()
+    {
+        var dir = Directory.CreateTempSubdirectory("phonebox-lan-port-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "config.json");
+            File.WriteAllText(path, """{"lan":{"enabled":true,"port":8766,"token":"phone-tok","webhookToken":"hook-tok"},"updates":{"repo":"G-Tech-marksman/phonebox"}}""");
+            var store = new ConfigStore(path);
+            Assert.Equal(8766, JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(path), ConfigStore.ReadOpts)!.Lan.Port);
+            Assert.Equal(LanConfig.FixedPort, store.Get().Lan.Port);
+            store.PersistGenerated();
+            var saved = JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(path), ConfigStore.ReadOpts)!;
+            Assert.Equal(LanConfig.FixedPort, saved.Lan.Port);
+            Assert.Equal("phone-tok", saved.Lan.Token);
+            Assert.True(saved.Lan.Enabled);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 }

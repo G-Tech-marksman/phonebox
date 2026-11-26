@@ -16,7 +16,7 @@
   With options (must use scriptblock form; plain iex cannot pass parameters):
 
     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -NoPhone
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.4
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.5
 
   Or set $env:PHONEBOX_REPO = 'G-Tech-marksman/phonebox' before running.
 
@@ -64,7 +64,9 @@ if ($Repo -match '^https?://github\.com/([^/]+)/([^/#?]+)') { $Repo = "$($Matche
 $Repo = $Repo.Trim().Trim('/')
 if ($Repo -notmatch '^[^/\s]+/[^/\s]+$') { throw "Invalid -Repo '$Repo' (expected owner/name, for example G-Tech-marksman/phonebox)." }
 $Package = 'net.oxog.phonebox.deskpanel'
+# Local Settings UI (HTTP loopback). Wi-Fi / pairing HTTPS listen port is fixed at 1766 (see Force-LanPort).
 $SettingsUrl = 'http://127.0.0.1:8765'
+$LanPort = 1766
 
 function Write-Step([string]$Text) { Write-Host ''; Write-Host "==> $Text" -ForegroundColor Cyan }
 function Write-Info([string]$Text) { Write-Host "    $Text" }
@@ -296,6 +298,27 @@ function Select-Phone([string]$Adb, [string[]]$Ignored) {
         $answer = "$(Read-Host '    Press Enter to check again, or type S to skip the phone')".Trim().ToLowerInvariant()
         if ($answer -eq 's' -or $answer -eq 'skip') { return $null }
         [void](Invoke-Native $Adb @('reconnect', 'offline'))
+    }
+}
+
+function Force-LanPort {
+    # Rewrite %APPDATA%\PhoneBox\config.json lan.port to 1766 before start so an older 8766 install binds the VPN port.
+    $config = Join-Path $env:APPDATA 'PhoneBox\config.json'
+    if (-not (Test-Path -LiteralPath $config)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $config -Raw -Encoding UTF8
+        $obj = $raw | ConvertFrom-Json
+        if (-not $obj.lan) { $obj | Add-Member -NotePropertyName lan -NotePropertyValue ([pscustomobject]@{}) -Force }
+        $prev = $null
+        try { $prev = [int]$obj.lan.port } catch { }
+        if ($prev -eq $LanPort) { return }
+        $obj.lan | Add-Member -NotePropertyName port -NotePropertyValue $LanPort -Force
+        $json = $obj | ConvertTo-Json -Depth 100
+        Set-Content -LiteralPath $config -Value $json -Encoding UTF8
+        if ($null -eq $prev) { Write-Ok "Set Wi-Fi listen port to $LanPort in config.json" }
+        else { Write-Ok "Migrated Wi-Fi listen port $prev → $LanPort in config.json (Settings UI stays at $SettingsUrl)" }
+    } catch {
+        Write-Caution "Could not rewrite lan.port in config.json: $($_.Exception.Message). The agent still forces $LanPort on startup."
     }
 }
 
@@ -535,9 +558,12 @@ function Install-PhoneBox {
             }
         }
 
+        Force-LanPort
+
         if ($NoStart) {
             Write-Step 'Done (not started)'
             Write-Info "Start it with $exe"
+            Write-Info "Settings UI: $SettingsUrl · Wi-Fi / pairing listen port: $LanPort"
         } else {
             Write-Step 'Starting PhoneBox'
             $blocked = $false
@@ -567,7 +593,7 @@ function Install-PhoneBox {
                 try { Invoke-RestMethod -UseBasicParsing "$SettingsUrl/api/info" -TimeoutSec 2 | Out-Null; $up = $true } catch { }
             }
             if ($up) {
-                Write-Ok "PhoneBox is running: settings at $SettingsUrl (also from the tray icon)"
+                Write-Ok "PhoneBox is running: Settings at $SettingsUrl (tray icon). Wi-Fi / pairing listens on TCP $LanPort."
                 try { Start-Process $SettingsUrl } catch { }
             } elseif ($blocked) {
                 # explained above

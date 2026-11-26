@@ -311,10 +311,17 @@ public sealed class DisplayConfig
 
 public sealed class LanConfig
 {
+    /// <summary>
+    /// Fixed Wi-Fi / Tailscale / VPN listen port for this fork. Older configs with 8766 (or any other value) are
+    /// rewritten to this on load. The local Settings page stays on loopback <c>8765</c> (HTTP); this port is HTTPS
+    /// pairing only.
+    /// </summary>
+    public const int FixedPort = 1766;
+
     /// <summary>Also accept the phone over Wi-Fi (HTTPS + token, paired over USB). Requires an agent restart.</summary>
     public bool Enabled { get; set; }
-    /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale (default 1766). Editable in Settings; Save + Restart to apply. The phone pairing link and manual host+port UI use the same value.</summary>
-    public int Port { get; set; } = 1766;
+    /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale / VPN (always <see cref="FixedPort"/>). Pairing links and the phone use the same value.</summary>
+    public int Port { get; set; } = FixedPort;
     /// <summary>
     /// Extra hosts put in the pairing link and offered to the phone: public IP, DDNS name, or Tailscale MagicDNS.
     /// The agent still listens on all interfaces; the user must forward this port or use Tailscale. Empty = LAN/Tailscale
@@ -899,7 +906,8 @@ public sealed partial class ConfigStore(string path)
         c.Updates.Token = string.IsNullOrWhiteSpace(c.Updates.Token) ? null
             : new string(c.Updates.Token.Where(ch => !char.IsControl(ch)).ToArray()).Trim() is { Length: > 0 and <= 256 } tok
                 ? tok : null;
-        c.Lan.Port = Math.Clamp(c.Lan.Port, 1024, 65535);
+        // Fork pin: always listen/advertise on FixedPort (migrate 8766 and any other saved value).
+        c.Lan.Port = LanConfig.FixedPort;
         c.Lan.AdvertiseHosts = Lan.NormalizeAdvertiseHosts(c.Lan.AdvertiseHosts);
         if (string.IsNullOrWhiteSpace(c.Lan.Token)) c.Lan.Token = NewToken();
         if (string.IsNullOrWhiteSpace(c.Lan.WebhookToken)) c.Lan.WebhookToken = NewToken();
@@ -1234,9 +1242,11 @@ public sealed partial class ConfigStore(string path)
             var onDisk = JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(path), ReadOpts);
             var damagedIcons = (onDisk?.Pages ?? []).Any(p => p is not null && IconText.Repair(p.Icon) != p.Icon)
                 || (onDisk?.Shortcuts ?? []).Any(s => s is not null && IconText.Repair(s.Icon) != s.Icon);
-            if (!damagedIcons && onDisk?.Lan?.Token == c.Lan.Token && onDisk?.Lan?.WebhookToken == c.Lan.WebhookToken) return;
+            var portOk = (onDisk?.Lan?.Port ?? 0) == LanConfig.FixedPort;
+            if (!damagedIcons && portOk && onDisk?.Lan?.Token == c.Lan.Token && onDisk?.Lan?.WebhookToken == c.Lan.WebhookToken) return;
         }
         catch { }
+        // Also rewrites lan.port when an older install still has 8766 (or any non-FixedPort).
         Save(JsonSerializer.Serialize(c, WriteOpts), version);
     }
 

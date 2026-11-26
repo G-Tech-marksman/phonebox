@@ -214,20 +214,21 @@ public sealed class PairingTests
         finally { Directory.Delete(dir, recursive: true); }
     }
 
-    // ConfigStore.Save keeps the last of repeated members; the port check must look at that one.
+    // ConfigStore.Save keeps the last of repeated members; collision uses FixedPort (1766), not a JSON port value.
     [Theory]
     [InlineData("""{"lan":{"enabled":false},"lan":{"enabled":true,"port":8765}}""", true)]
     [InlineData("""{"lan":{"enabled":true,"port":8765},"LAN":{"enabled":false}}""", false)]
     [InlineData("""{"lan":{"enabled":true,"port":8765},"lan":null}""", false)]
     public void TheLastOfRepeatedLanMembersIsTheOneChecked(string json, bool collides)
     {
-        Assert.Equal(collides, Program.LanPortCollidesWithLocal(json, 8765));
+        Assert.Equal(collides, Program.LanPortCollidesWithLocal(json, LanConfig.FixedPort));
         var dir = Directory.CreateTempSubdirectory("phonebox-lan-repeat-").FullName;
         try
         {
             var cfg = new ConfigStore(Path.Combine(dir, "config.json"));
             Assert.Null(cfg.Save(json));
-            Assert.Equal(collides, cfg.Get().Lan.Enabled && cfg.Get().Lan.Port == 8765);
+            Assert.Equal(LanConfig.FixedPort, cfg.Get().Lan.Port);
+            Assert.Equal(collides, cfg.Get().Lan.Enabled);
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -248,8 +249,10 @@ public sealed class PairingTests
             if (!OperatingSystem.IsWindows())
                 Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(certPath));
 
-            Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":8765}}""", 8765));
-            Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true}}""", 1766));
+            // lan.port is always FixedPort (1766); an old JSON value of 8765 is ignored for collision.
+            Assert.False(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":8765}}""", 8765));
+            Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true}}""", LanConfig.FixedPort));
+            Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":8766}}""", LanConfig.FixedPort));
             Assert.False(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":false,"port":8765}}""", 8765));
             Assert.False(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":1766}}""", 8765));
         }
