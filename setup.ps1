@@ -16,7 +16,7 @@
   With options (must use scriptblock form; plain iex cannot pass parameters):
 
     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -NoPhone
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.6
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.7
 
   Or set $env:PHONEBOX_REPO = 'G-Tech-marksman/phonebox' before running.
 
@@ -588,7 +588,8 @@ function Install-PhoneBox {
                 }
             }
             $up = $false
-            for ($i = 0; $i -lt 30 -and -not $up -and -not $blocked; $i++) {
+            # Single-file cold start + optional Wi-Fi bind retry (--no-wifi-listen) can exceed ~20s on Windows.
+            for ($i = 0; $i -lt 60 -and -not $up -and -not $blocked; $i++) {
                 Start-Sleep -Milliseconds 700
                 try { Invoke-RestMethod -UseBasicParsing "$SettingsUrl/api/info" -TimeoutSec 2 | Out-Null; $up = $true } catch { }
             }
@@ -600,7 +601,14 @@ function Install-PhoneBox {
             } elseif (-not (Test-Path $exe)) {
                 Write-Caution "PhoneBoxAgent.exe was removed, probably by an antivirus. See https://github.com/$Repo/issues/69."
             } else {
-                Write-Caution "The agent did not answer. Its log: $env:LOCALAPPDATA\PhoneBox\agent.log"
+                Write-Caution "The agent did not answer at $SettingsUrl/api/info. Log: $env:LOCALAPPDATA\PhoneBox\agent.log"
+                $log = Join-Path $env:LOCALAPPDATA 'PhoneBox\agent.log'
+                if (Test-Path -LiteralPath $log) {
+                    Write-Caution 'Last lines of agent.log:'
+                    Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+                } else {
+                    Write-Caution 'agent.log is missing (process may have exited before logging). If port 1766 is reserved by Hyper-V, run: netsh interface ipv4 show excludedportrange protocol=tcp'
+                }
                 if ($smartAppControl -eq 1) {
                     Write-Caution 'Smart App Control may have blocked it: see Windows Security > App & browser control, and the warning above.'
                 }

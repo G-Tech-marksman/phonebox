@@ -89,6 +89,23 @@ public static class Lan
         return list.Distinct().ToList();
     }
 
+    /// <summary>True when a TCP bind to <paramref name="ip"/>:<paramref name="port"/> succeeds (then released).</summary>
+    public static bool TryProbeBind(IPAddress ip, int port)
+    {
+        try
+        {
+            using var s = new Socket(ip.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            s.ExclusiveAddressUse = true;
+            s.Bind(new IPEndPoint(ip, port));
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Addresses from <see cref="WifiBindAddresses"/> that currently accept a TCP bind on <paramref name="port"/>.</summary>
+    public static IReadOnlyList<IPAddress> WifiBindAddressesThatBind(int port) =>
+        WifiBindAddresses().Where(ip => TryProbeBind(ip, port)).ToList();
+
     /// <summary>
     /// Hosts put in the pairing payload. User-typed <see cref="LanConfig.AdvertiseHosts"/> (public IP, DDNS,
     /// MagicDNS, VPN hostname) come first so they are never truncated by many LAN adapters and so a phone on VPN

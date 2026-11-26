@@ -44,10 +44,27 @@ var configStore = new ConfigStore(configPath);
 configStore.PersistGenerated(); // keep the Wi-Fi token stable across restarts
 var lanCfg = configStore.Get().Lan;
 // Wi-Fi HTTPS can share the Settings TCP port: HTTP stays on 127.0.0.1, HTTPS binds non-loopback NICs only.
+// --no-wifi-listen: Settings-only retry after a Wi-Fi NIC bind failed and aborted Kestrel (see Run below).
+var skipWifiListen = args.Contains("--no-wifi-listen");
 var lanCert = lanCfg.Enabled ? Lan.Certificate(configDir) : null;
 // USB uses the same certificate as Wi-Fi; the agent hands its fingerprint to the app over adb (see UsbLink.cs)
 var usbCert = lanCert ?? Lan.Certificate(configDir);
 var usb = new UsbLink(UsbLink.FreeLoopbackPort(), Lan.Fingerprint(usbCert));
+// Probe before Listen: one unboundable NIC must not prevent Settings HTTP from coming up (setup health check).
+var wifiBindIps = !skipWifiListen && lanCert is not null && lanCfg.Port == Port
+    ? Lan.WifiBindAddressesThatBind(lanCfg.Port)
+    : [];
+if (!Lan.TryProbeBind(IPAddress.Loopback, Port))
+{
+    try
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.LogPath)!);
+        File.AppendAllText(AppPaths.LogPath,
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} cannot bind Settings HTTP on 127.0.0.1:{Port} " +
+            $"(in use or reserved — on Windows check: netsh interface ipv4 show excludedportrange protocol=tcp).{Environment.NewLine}");
+    }
+    catch { }
+}
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -64,13 +81,11 @@ builder.WebHost.ConfigureKestrel(k =>
     // USB: the end of the phone's adb reverse tunnel, on a port of its own, over TLS the app pins, with the app's key
     k.Listen(IPAddress.Loopback, usb.Port, l => l.UseHttps(usbCert));
     // Wi-Fi / Tailscale / VPN: HTTPS with a pinned self-signed certificate, token required (see Lan.cs).
-    // When lan.port == Settings port, bind each non-loopback IPv4 (not 0.0.0.0) so HTTP Settings can keep 127.0.0.1.
-    if (lanCert is not null)
+    if (lanCert is not null && !skipWifiListen)
     {
         if (lanCfg.Port == Port)
         {
-            // Same TCP port as Settings HTTP: HTTPS only on non-loopback IPv4s (not 0.0.0.0).
-            foreach (var ip in Lan.WifiBindAddresses())
+            foreach (var ip in wifiBindIps)
                 k.Listen(ip, lanCfg.Port, l => l.UseHttps(lanCert));
         }
         else
@@ -1283,26 +1298,51 @@ app.Lifetime.ApplicationStarted.Register(() =>
 {
     app.Logger.LogInformation("PhoneBox agent {Version} ready on http://127.0.0.1:{Port}, phone USB port {UsbPort} (config: {Path})",
         AppPaths.Version, Port, usb.Port, configPath);
-    if (lanCert is not null && lanCfg.Port == Port)
+    if (skipWifiListen)
+        app.Logger.LogWarning("Started without Wi-Fi HTTPS binds (--no-wifi-listen); Settings HTTP is on 127.0.0.1:{Port}. Fix NIC binds or excluded ports, then Restart.", Port);
+    else if (lanCert is not null && lanCfg.Port == Port)
     {
-        var nics = Lan.WifiBindAddresses();
-        if (nics.Count == 0)
-            app.Logger.LogWarning("Wi-Fi is on but no non-loopback IPv4 was found to bind HTTPS :{Port}; Settings HTTP is on 127.0.0.1:{Port}. Connect a network or restart after VPN is up.", Port, Port);
+        if (wifiBindIps.Count == 0)
+            app.Logger.LogWarning("Wi-Fi is on but no non-loopback IPv4 could bind HTTPS :{Port}; Settings HTTP is on 127.0.0.1:{Port}. Connect a network/VPN and Restart.", Port, Port);
         else
-            app.Logger.LogInformation("Wi-Fi / VPN HTTPS on port {Port} bound to: {Addresses}", Port, string.Join(", ", nics));
+            app.Logger.LogInformation("Wi-Fi / VPN HTTPS on port {Port} bound to: {Addresses}", Port, string.Join(", ", wifiBindIps));
     }
 });
 
 // macOS, running as PhoneBox.app: the main thread belongs to the menu bar icon and the host runs beside it (MenuBarHost)
-if (!MenuBarHost.TryRun(app, args, endpoint, configDir)) app.Run();
+try
+{
+    if (!MenuBarHost.TryRun(app, args, endpoint, configDir)) app.Run();
+}
+catch (Exception ex) when (lanCert is not null && !skipWifiListen && lanCfg.Port == Port)
+{
+    // A Wi-Fi NIC Listen that passed probe can still fail at Kestrel start on Windows; retry Settings-only so setup's
+    // http://127.0.0.1:1766/api/info health check succeeds.
+    try
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.LogPath)!);
+        File.AppendAllText(AppPaths.LogPath,
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} Wi-Fi HTTPS bind failed; restarting without Wi-Fi listens: {ex}{Environment.NewLine}");
+    }
+    catch { }
+    single.ReleaseMutex();
+    single.Dispose();
+    var exe = Environment.ProcessPath;
+    if (exe is not null)
+    {
+        var next = args.Where(a => a != "--no-wifi-listen").Concat(["--no-wifi-listen"]).ToArray();
+        System.Diagnostics.Process.Start(AppRestart.StartInfo(exe, next));
+    }
+    return;
+}
 
 // Restart requested from the settings page (e.g. Wi-Fi turned on): hand over to a fresh instance.
 single.ReleaseMutex();
 single.Dispose();
-if (AppRestart.Requested && (AppRestart.Executable ?? Environment.ProcessPath) is { } exe)
+if (AppRestart.Requested && (AppRestart.Executable ?? Environment.ProcessPath) is { } restartExe)
 {
     if (AppRestart.ServiceManaged(Environment.GetEnvironmentVariable, Environment.ProcessId, AppRestart.ParentName)) Environment.ExitCode = AppRestart.ServiceRestartCode;
-    else System.Diagnostics.Process.Start(AppRestart.StartInfo(exe, args));
+    else System.Diagnostics.Process.Start(AppRestart.StartInfo(restartExe, args.Where(a => a != "--no-wifi-listen").ToArray()));
 }
 
 static void AddMonitor<T>(IServiceCollection s) where T : class, IHostedService

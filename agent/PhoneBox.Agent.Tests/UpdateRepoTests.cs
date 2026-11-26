@@ -75,6 +75,20 @@ public sealed class LanAdvertiseTests
     }
 
     [Fact]
+    public void TryProbeBindAcceptsLoopbackOnEphemeralPort()
+    {
+        // Bind port 0 to learn a free port, release, then probe that port on loopback.
+        int port;
+        using (var s = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp))
+        {
+            s.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+            port = ((System.Net.IPEndPoint)s.LocalEndPoint!).Port;
+        }
+        Assert.True(Lan.TryProbeBind(System.Net.IPAddress.Loopback, port));
+        Assert.False(Lan.TryProbeBind(System.Net.IPAddress.Loopback, 1)); // typically privileged / refused
+    }
+
+    [Fact]
     public void PersistGeneratedMigratesLegacyLanPortToFixed1766()
     {
         var dir = Directory.CreateTempSubdirectory("phonebox-lan-port-").FullName;

@@ -76,7 +76,7 @@ To pass options:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -NoPhone
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.6
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.7
 ```
 
 ```sh
@@ -86,10 +86,10 @@ curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk
 
 <details><summary><b>Repair after a bad install (Windows)</b></summary>
 
-If setup finished but the agent never answered (`agent.log` under `%LOCALAPPDATA%\PhoneBox`), re-run setup so it replaces the app with the latest fork release (needs **v0.9.29-gtech.6** or newer — that zip is the real Windows WinForms/`WinExe` build; it **forces** Wi-Fi listen port **1766** even if config still says 8766):
+If setup finished but the agent never answered (`agent.log` under `%LOCALAPPDATA%\PhoneBox`), re-run setup so it replaces the app with the latest fork release (needs **v0.9.29-gtech.7** or newer — that zip is the real Windows WinForms/`WinExe` build; it **forces** Wi-Fi listen port **1766** even if config still says 8766):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Yes -Version 0.9.29-gtech.6
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Yes -Version 0.9.29-gtech.7
 ```
 
 Then open http://127.0.0.1:1766. If it still fails, open `%LOCALAPPDATA%\PhoneBox\agent.log` and paste the **last ~40 lines** (especially any `Exception` / `fail` / `error` lines). Also confirm Explorer shows `PhoneBoxAgent.exe` still under `%LOCALAPPDATA%\PhoneBox\app` (antivirus sometimes deletes it).
