@@ -8,19 +8,25 @@
 
 ### 1. Install PhoneBox on the computer
 
-**Windows 10/11**: open PowerShell (a normal window, not *Run as administrator*) and paste:
+**Windows 10/11**: open PowerShell (a normal window, not *Run as administrator*) and paste this fork’s installer (downloads agent builds from **G-Tech-marksman/phonebox**, not upstream):
 
 ```powershell
-irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1 | iex
+irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1 | iex
+```
+
+After this branch is merged to `main`:
+
+```powershell
+irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1 | iex
 ```
 
 **Linux and macOS**: open a terminal and paste (run it as yourself, not with `sudo`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 ```
 
-Setup installs the [latest release](https://github.com/ersinkoc/phonebox/releases/latest) and anything missing:
+Setup installs the [latest release with an agent zip](https://github.com/G-Tech-marksman/phonebox/releases) from this fork and anything missing:
 
 1. **Checks the computer**: Windows x64; Linux x64 / ARM64 with glibc; macOS on Apple silicon or Intel.
 2. **Downloads and checks the agent**: the download must match the release's SHA-256 checksums. With the
@@ -62,17 +68,20 @@ and changes nothing.
 | `-NoAutostart` | `--no-autostart` | Do not start PhoneBox at login |
 | `-NoStart` | `--no-start` | Install only |
 | — | `--no-extras` | Do not offer the optional helpers |
+| `-Repo owner/name` | `--repo owner/name` | GitHub repo for releases (default `G-Tech-marksman/phonebox`; or `$env:PHONEBOX_REPO` / `$PHONEBOX_REPO`) |
 | `-Version 0.9.8` | `--version 0.9.8` | Install that release instead of the latest |
 | `-DryRun` | `--dry-run` | Download and check, change nothing |
 
 To pass options:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1))) -NoPhone
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -NoPhone
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox
 ```
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash -s -- --no-phone
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash -s -- --no-phone
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash -s -- --repo G-Tech-marksman/phonebox
 ```
 
 </details>
