@@ -514,9 +514,41 @@ class MainActivity : Activity(), SensorEventListener {
 
     private fun confirmPair(pairing: AgentLink.PairLink) {
         val context = pairingContext()
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val body = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_message_lead, pairing.pc, pairing.hosts.joinToString(), pairing.port)
+            })
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_check_label)
+                setPadding(0, pad / 2, 0, pad / 4)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            })
+            // Selectable / tap-to-copy confirm code so it matches the computer pairing window clearly.
+            addView(TextView(context).apply {
+                text = pairing.check
+                setTextIsSelectable(true)
+                typeface = android.graphics.Typeface.MONOSPACE
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                gravity = Gravity.CENTER
+                setPadding(pad / 2, pad / 2, pad / 2, pad / 2)
+                setBackgroundColor(0x221E293B)
+                setOnClickListener {
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("pair-check", pairing.check))
+                    Toast.makeText(context, context.getString(R.string.pair_copied), Toast.LENGTH_SHORT).show()
+                }
+            })
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_message_tail)
+                setPadding(0, pad / 2, 0, 0)
+            })
+        }
         AlertDialog.Builder(this)
             .setTitle(context.getString(R.string.pair_title))
-            .setMessage(context.getString(R.string.pair_message, pairing.pc, pairing.hosts.joinToString(), pairing.port, pairing.check))
+            .setView(body)
             .setPositiveButton(context.getString(R.string.pair_positive)) { _, _ -> pair(pairing, context) }
             .setNegativeButton(context.getString(R.string.pair_negative), null)
             .setOnDismissListener { hideSystemUi() }

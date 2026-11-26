@@ -20,6 +20,16 @@ h1 { font-size: 20px; margin-bottom: 20px; }
 .secondary { border: 1px solid var(--line); color: var(--text); }
 .warn { color: var(--warn); }
 code { font-size: 13px; }
+.pair-code-box {
+  display: block; width: 100%; box-sizing: border-box; margin: 10px 0 4px; padding: 12px 14px;
+  font: 600 20px/1.35 ui-monospace, Consolas, monospace; letter-spacing: .06em;
+  color: var(--text); background: #0a0e14; border: 1px solid var(--line); border-radius: 12px;
+  cursor: copy; user-select: all; -webkit-user-select: all; text-align: center;
+}
+.pair-code-box:hover { border-color: var(--accent); }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1a2330; border: 1px solid var(--line);
+  color: var(--text); padding: 8px 14px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .15s; }
+.toast.on { opacity: 1; }
 </style>
 </head>
 <body>
@@ -28,8 +38,9 @@ code { font-size: 13px; }
 
   <div class="card" id="ok" hidden>
     <h2>Pair this phone with a computer?</h2>
-    <p class="muted">“<span id="pc"></span>” at <span id="hosts"></span>. Check that the computer's pairing window shows the code
-      <b id="check"></b>, and continue only if you started pairing there.</p>
+    <p class="muted">“<span id="pc"></span>” at <span id="hosts"></span>. Check that the computer's pairing window shows this code, and continue only if you started pairing there.</p>
+    <button type="button" class="pair-code-box" id="check" title="Click to copy">—</button>
+    <p class="muted" id="copied" hidden style="margin-top:6px;color:var(--accent)">Copied</p>
     <a class="btn primary" id="open" href="#">Open in PhoneBox</a>
     <p class="muted" id="plainWrap" hidden style="margin-top:10px">Did a store open instead? Some browsers send app links there;
       <a id="plain" href="#" style="color:var(--accent)">open the pairing link directly</a>. If Android then asks which app to
@@ -96,7 +107,27 @@ code { font-size: 13px; }
   p.set('port', String(port));
   document.getElementById('pc').textContent = (p.get('pc') || 'your computer').slice(0, 64);
   document.getElementById('hosts').textContent = hosts.join(', ') + ' (port ' + port + ')';
-  document.getElementById('check').textContent = (p.get('fp').slice(0, 4) + ' ' + p.get('fp').slice(4, 8)).toUpperCase();
+  const check = (p.get('fp').slice(0, 4) + ' ' + p.get('fp').slice(4, 8)).toUpperCase();
+  const checkEl = document.getElementById('check');
+  checkEl.textContent = check;
+  checkEl.onclick = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(check);
+      else {
+        const range = document.createRange();
+        range.selectNodeContents(checkEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        sel.removeAllRanges();
+      }
+      const tip = document.getElementById('copied');
+      tip.hidden = false;
+      clearTimeout(tip._t);
+      tip._t = setTimeout(() => { tip.hidden = true; }, 1500);
+    } catch (_) {}
+  };
   const query = ['v', 'pc', 'fp', 'port', 'h', 'c'].filter((k) => p.has(k)).map((k) => k + '=' + encodeURIComponent(p.get(k))).join('&');
   const android = /Android/i.test(navigator.userAgent);
   // Fallback stays on this agent (same origin), never a third-party GitHub Pages host.

@@ -369,6 +369,9 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
         claims = codes.Claims,
         attempt,
         check = PairingCodes.Check(fingerprint),
+        // Local settings page only: shown in a click-to-copy box for confirming on the phone / pasting into manual pair.
+        code,
+        fingerprint,
         link,
         pageLink,
         qr = PairingCodes.Svg(link),
