@@ -330,7 +330,7 @@ app.MapGet("/api/pair", (ConfigStore cfg) =>
         port = lanCfg.Port,
         token = lan.Token,
         fingerprint = Lan.Fingerprint(lanCert),
-        hosts = Lan.Addresses(),
+        hosts = Lan.AdvertisedHosts(lan),
         macs = WakeOnLan.LocalMacs(),
     });
 });
@@ -344,14 +344,17 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
     if (!cfg.Get().Lan.Enabled || lanCert is null)
         return Results.Json(new { enabled = false, configured = cfg.Get().Lan.Enabled });
     var (code, expiresAt, attempt) = codes.Start(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-    var hosts = Lan.Addresses();
+    var lan = cfg.Get().Lan;
+    var hosts = Lan.AdvertisedHosts(lan);
     var fingerprint = Lan.Fingerprint(lanCert);
     var pc = Environment.MachineName;
     // App deep link for the QR / Copy button — no third-party GitHub Pages hop.
     var link = PairingCodes.Link(pc, fingerprint, lanCfg.Port, hosts, code);
-    // Optional https landing page on this agent (same Wi-Fi port) when a camera needs an https:// URL.
-    var pageLink = hosts.Count > 0
-        ? PairingCodes.PageLink(hosts[0], lanCfg.Port, pc, fingerprint, lanCfg.Port, hosts, code)
+    // Prefer a user-advertised remote host for the https landing page when set; else the first LAN/Tailscale address.
+    var pageHost = Lan.NormalizeAdvertiseHosts(lan.AdvertiseHosts).FirstOrDefault()
+        ?? hosts.FirstOrDefault();
+    var pageLink = pageHost is not null
+        ? PairingCodes.PageLink(pageHost, lanCfg.Port, pc, fingerprint, lanCfg.Port, hosts, code)
         : null;
     var repo = cfg.Get().Updates.Repo;
     if (string.IsNullOrWhiteSpace(repo)) repo = "G-Tech-marksman/phonebox";
@@ -378,22 +381,40 @@ app.MapGet("/api/pair/status", (PairingCodes codes) => Results.Json(new { claims
 app.MapPost("/api/pair/claim", (HttpRequest req, ConfigStore cfg, PairingCodes codes) =>
     ClaimPairingAsync(req, cfg, codes, lanCert, lanCfg.Port, app.Logger));
 
-app.MapGet("/api/lan", (ConfigStore cfg) => Results.Json(new
+app.MapGet("/api/lan", (ConfigStore cfg) =>
 {
-    configured = cfg.Get().Lan.Enabled,
-    active = lanCert is not null,
-    port = lanCfg.Port,
-    restartNeeded = cfg.Get().Lan.Enabled != (lanCert is not null) || (lanCert is not null && cfg.Get().Lan.Port != lanCfg.Port),
-    hosts = Lan.Addresses(),
-    fingerprint = lanCert is null ? null : Lan.Fingerprint(lanCert),
-}));
+    var lan = cfg.Get().Lan;
+    return Results.Json(new
+    {
+        configured = lan.Enabled,
+        active = lanCert is not null,
+        port = lanCfg.Port,
+        restartNeeded = lan.Enabled != (lanCert is not null) || (lanCert is not null && lan.Port != lanCfg.Port),
+        hosts = Lan.Addresses(),
+        advertiseHosts = Lan.NormalizeAdvertiseHosts(lan.AdvertiseHosts),
+        advertised = Lan.AdvertisedHosts(lan),
+        fingerprint = lanCert is null ? null : Lan.Fingerprint(lanCert),
+    });
+});
 
-app.MapGet("/api/update", (UpdateService upd, ConfigStore cfg) => Results.Json(new { status = upd.Status(), auto = cfg.Get().Updates.Auto, installed = UpdateService.CanUpdateAgent }));
+app.MapGet("/api/update", (UpdateService upd, ConfigStore cfg) =>
+{
+    var u = cfg.Get().Updates;
+    return Results.Json(new
+    {
+        status = upd.Status(),
+        auto = u.Auto,
+        installed = UpdateService.CanUpdateAgent,
+        repo = UpdateService.NormalizeRepo(u.Repo) ?? u.Repo,
+        branch = u.Branch,
+        hasToken = !string.IsNullOrEmpty(u.Token),
+    });
+});
 // Settings › General: install the phone app on a phone that does not have it yet (local only).
 app.MapPost("/api/phone/install", async (UpdateService upd) =>
     await upd.InstallAppAsync() is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 app.MapPost("/api/update/check", async (UpdateService upd) => { await upd.CheckAsync(); return Results.Json(upd.Status()); });
-app.MapPost("/api/update/apply", (UpdateService upd) => { _ = Task.Run(() => upd.ApplyAsync()); return Results.Accepted(); });
+app.MapPost("/api/update/apply", (UpdateService upd) => { _ = Task.Run(() => upd.ApplyAsync(automatic: false)); return Results.Accepted(); });
 
 app.MapPost("/api/restart", (IHostApplicationLifetime life) =>
 {
@@ -454,6 +475,7 @@ app.MapGet("/api/settings", (HttpRequest req, ConfigStore cfg, HttpResponse res)
     {
         var publicConfig = JsonSerializer.SerializeToNode(config, ConfigStore.WriteOpts)?.AsObject();
         if (publicConfig?["steam"] is JsonObject steam) steam.Remove("apiKey");
+        if (publicConfig?["updates"] is JsonObject updates) updates.Remove("token");
         json = publicConfig?.ToJsonString(ConfigStore.WriteOpts) ?? json;
     }
     res.Headers["X-Config-Version"] = cfg.Version.ToString();
@@ -473,10 +495,12 @@ app.MapPut("/api/settings", async (HttpRequest req, ConfigStore cfg, ControlDeck
     AgentConfig? proposed = null;
     try { proposed = JsonSerializer.Deserialize<AgentConfig>(body, ConfigStore.ReadOpts); }
     catch (JsonException) { }
-    // /api/settings redacts Steam's key for callers that are not the same-origin desktop page.
+    // /api/settings redacts Steam's key and the updates PAT for callers that are not the same-origin desktop page.
     // Keep the configured secret if that redacted (or older) client sends it back as missing/null.
-    if (ConfigStore.PreserveSteamApiKey(proposed, cfg.Get().Steam.ApiKey))
-        body = JsonSerializer.Serialize(proposed, ConfigStore.WriteOpts);
+    var preserved = false;
+    if (ConfigStore.PreserveSteamApiKey(proposed, cfg.Get().Steam.ApiKey)) preserved = true;
+    if (ConfigStore.PreserveUpdatesToken(proposed, cfg.Get().Updates.Token)) preserved = true;
+    if (preserved) body = JsonSerializer.Serialize(proposed, ConfigStore.WriteOpts);
     if (proposed?.Steam is { } steam)
     {
         steam.SteamId = string.IsNullOrWhiteSpace(steam.SteamId) ? null : steam.SteamId.Trim();
@@ -1377,7 +1401,7 @@ public partial class Program
             port = lanPort,
             token = lan.Token,
             fingerprint = Lan.Fingerprint(lanCert),
-            hosts = Lan.Addresses(),
+            hosts = Lan.AdvertisedHosts(lan),
             macs = WakeOnLan.LocalMacs(),
         });
     }

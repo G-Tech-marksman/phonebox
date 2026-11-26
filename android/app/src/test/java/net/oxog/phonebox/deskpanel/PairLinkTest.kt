@@ -22,10 +22,13 @@ class PairLinkTest {
     }
 
     @Test
-    fun allowedHostsIncludeDnsNamesButNotPublicIpv4() {
+    fun allowedHostsIncludePublicIpv4AndDnsNames() {
         assertTrue(AgentLink.PairLink.isAllowedHost("192.168.1.10"))
         assertTrue(AgentLink.PairLink.isAllowedHost("desk.tail1234.ts.net"))
-        assertFalse(AgentLink.PairLink.isAllowedHost("8.8.8.8"))
+        assertTrue(AgentLink.PairLink.isAllowedHost("8.8.8.8"))
+        assertTrue(AgentLink.PairLink.isAllowedHost("home.example.com"))
+        assertFalse(AgentLink.PairLink.isAllowedHost("127.0.0.1"))
+        assertFalse(AgentLink.PairLink.isAllowedHost("169.254.1.1"))
         assertFalse(AgentLink.PairLink.isAllowedHost("localhost"))
         assertFalse(AgentLink.PairLink.isAllowedHost(""))
     }
@@ -43,8 +46,15 @@ class PairLinkTest {
     }
 
     @Test
-    fun parseQueryRejectsPublicHostsInQrPayload() {
-        assertNull(AgentLink.PairLink.parseQuery("v=1&pc=Desk&fp=$fp&port=8766&h=8.8.8.8&c=$code"))
+    fun parseQueryKeepsPublicAndDnsHosts() {
+        val link = AgentLink.PairLink.parseQuery("v=1&pc=Desk&fp=$fp&port=8766&h=8.8.8.8,home.example.com&c=$code")
+        assertNotNull(link)
+        assertEquals(listOf("8.8.8.8", "home.example.com"), link!!.hosts)
+    }
+
+    @Test
+    fun parseQueryRejectsLoopbackOnlyPayload() {
+        assertNull(AgentLink.PairLink.parseQuery("v=1&pc=Desk&fp=$fp&port=8766&h=127.0.0.1&c=$code"))
     }
 
     @Test
@@ -58,8 +68,8 @@ class PairLinkTest {
     @Test
     fun withEndpointOverridesHostAndPort() {
         val base = AgentLink.PairLink.parseQuery("v=1&pc=Desk&fp=$fp&port=8766&h=192.168.1.10&c=$code")!!
-        val next = base.withEndpoint(listOf("100.64.0.7"), 9001)
-        assertEquals(listOf("100.64.0.7"), next.hosts)
+        val next = base.withEndpoint(listOf("home.example.com"), 9001)
+        assertEquals(listOf("home.example.com"), next.hosts)
         assertEquals(9001, next.port)
         assertEquals(fp, next.fingerprint)
         assertEquals(code, next.code)
@@ -70,6 +80,7 @@ class PairLinkTest {
         assertTrue(AgentLink.PairLink.isPairHttpPath("/pair"))
         assertTrue(AgentLink.PairLink.isPairHttpPath("/pair/"))
         assertTrue(AgentLink.PairLink.isPairHttpHost("192.168.1.10"))
+        assertTrue(AgentLink.PairLink.isPairHttpHost("home.example.com"))
         assertTrue(AgentLink.PairLink.isPairHttpHost("g-tech-marksman.github.io"))
         assertFalse(AgentLink.PairLink.isPairHttpHost("ersinkoc.github.io"))
     }

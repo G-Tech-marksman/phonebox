@@ -127,9 +127,37 @@ public sealed class UpdateService(ConfigStore cfg, AdbReverse adb, IHostApplicat
         try
         {
             _state = "checking";
-            var repo = cfg.Get().Updates.Repo;
-            using var doc = JsonDocument.Parse(await ApiStringAsync($"https://api.github.com/repos/{repo}/releases/latest", ct));
-            var r = doc.RootElement;
+            var updates = cfg.Get().Updates;
+            var repo = NormalizeRepo(updates.Repo) ?? "G-Tech-marksman/phonebox";
+            var branch = string.IsNullOrWhiteSpace(updates.Branch) ? null : updates.Branch.Trim();
+            JsonElement r;
+            if (branch is null)
+            {
+                using var doc = JsonDocument.Parse(await ApiStringAsync($"https://api.github.com/repos/{repo}/releases/latest", ct));
+                r = doc.RootElement.Clone();
+            }
+            else
+            {
+                // Prefer a release built from the configured branch; otherwise fall back to the repo's latest.
+                using var list = JsonDocument.Parse(await ApiStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=30", ct));
+                JsonElement? match = null;
+                foreach (var item in list.RootElement.EnumerateArray())
+                {
+                    if (item.TryGetProperty("draft", out var draft) && draft.GetBoolean()) continue;
+                    var target = item.TryGetProperty("target_commitish", out var tc) ? tc.GetString() : null;
+                    if (string.Equals(target, branch, StringComparison.OrdinalIgnoreCase))
+                    {
+                        match = item.Clone();
+                        break;
+                    }
+                }
+                if (match is { } found) r = found;
+                else
+                {
+                    using var latest = JsonDocument.Parse(await ApiStringAsync($"https://api.github.com/repos/{repo}/releases/latest", ct));
+                    r = latest.RootElement.Clone();
+                }
+            }
             foreach (var a in r.GetProperty("assets").EnumerateArray())
                 if (a.GetProperty("browser_download_url").GetString() is { } url && a.TryGetProperty("url", out var api) && api.GetString() is { } apiUrl)
                     _apiUrls[url] = apiUrl;
@@ -141,9 +169,50 @@ public sealed class UpdateService(ConfigStore cfg, AdbReverse adb, IHostApplicat
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            _error = "Update check failed: " + ex.Message;
+            // Never include the configured PAT in the status line (ex.Message can carry request URLs only).
+            _error = "Update check failed: " + RedactToken(ex.Message);
             _state = "idle";
         }
+    }
+
+    /// <summary>
+    /// Turns a github.com URL or <c>owner/name</c> into <c>owner/name</c>. Null when the value is empty or malformed.
+    /// </summary>
+    public static string? NormalizeRepo(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+        var s = input.Trim().TrimEnd('/');
+        if (s.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("github.com/", StringComparison.OrdinalIgnoreCase) || s.StartsWith("www.github.com/", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!s.Contains("://", StringComparison.Ordinal)) s = "https://" + s;
+            if (!Uri.TryCreate(s, UriKind.Absolute, out var uri)) return null;
+            if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                && !uri.Host.Equals("www.github.com", StringComparison.OrdinalIgnoreCase)) return null;
+            var parts = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) return null;
+            s = parts[0] + "/" + parts[1];
+        }
+        var slash = s.IndexOf('/');
+        if (slash <= 0 || slash != s.LastIndexOf('/') || slash >= s.Length - 1) return null;
+        var owner = s[..slash];
+        var name = s[(slash + 1)..];
+        if (owner.Length is 0 or > 100 || name.Length is 0 or > 100) return null;
+        if (owner.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_'))
+            || name.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'))) return null;
+        return owner + "/" + name;
+    }
+
+    private string? ConfiguredToken()
+    {
+        var t = cfg.Get().Updates.Token?.Trim();
+        return string.IsNullOrEmpty(t) ? null : t;
+    }
+
+    private string RedactToken(string message)
+    {
+        var t = ConfiguredToken();
+        return t is null ? message : message.Replace(t, "[redacted]", StringComparison.Ordinal);
     }
 
     /// <summary>Installs whatever is newer: the phone app first (needs USB), then the agent (restarts it).</summary>
@@ -505,7 +574,7 @@ public sealed class UpdateService(ConfigStore cfg, AdbReverse adb, IHostApplicat
             try { await DownloadToAsync(api, "application/octet-stream", tmp, ct); }
             catch (Exception ex2) when (Transient(ex2, ct))
             {
-                var token = await GhTokenAsync(ct);
+                var token = ConfiguredToken() ?? await GhTokenAsync(ct);
                 if (token is null) throw;
                 await DownloadToAsync(api, "application/octet-stream", tmp, ct, token);
             }
@@ -515,18 +584,26 @@ public sealed class UpdateService(ConfigStore cfg, AdbReverse adb, IHostApplicat
     }
 
     /// <summary>
-    /// GET on api.github.com. GitHub sometimes answers anonymous requests with 503 / 504 while it serves signed-in ones;
-    /// then the request is repeated with the GitHub CLI's token, if gh is installed and signed in. The token is sent to
-    /// api.github.com only (.NET drops the Authorization header when it follows a redirect to the download host).
+    /// GET on api.github.com. Uses the settings PAT when set; otherwise anonymous, then the GitHub CLI's token on
+    /// transient failures. The token is sent to api.github.com only (.NET drops Authorization on download redirects).
     /// </summary>
     private async Task<string> ApiStringAsync(string url, CancellationToken ct)
     {
+        var configured = ConfiguredToken();
+        if (configured is not null && IsGitHubApi(url))
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new("Bearer", configured);
+            using var res = await _http.SendAsync(req, ct);
+            res.EnsureSuccessStatusCode();
+            return await res.Content.ReadAsStringAsync(ct);
+        }
         try { return await _http.GetStringAsync(url, ct); }
         catch (Exception ex) when (Transient(ex, ct))
         {
             var token = await GhTokenAsync(ct);
             if (token is null) throw;
-            log.LogInformation("GitHub API without a token failed ({Msg}); retrying with the gh CLI's token", ex.Message);
+            log.LogInformation("GitHub API without a token failed ({Msg}); retrying with the gh CLI's token", RedactToken(ex.Message));
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             if (IsGitHubApi(url)) req.Headers.Authorization = new("Bearer", token);
             using var res = await _http.SendAsync(req, ct);

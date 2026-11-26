@@ -315,6 +315,12 @@ public sealed class LanConfig
     public bool Enabled { get; set; }
     /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale (default 8766). Editable in Settings; Save + Restart to apply. The phone pairing link and manual host+port UI use the same value.</summary>
     public int Port { get; set; } = 8766;
+    /// <summary>
+    /// Extra hosts put in the pairing link and offered to the phone: public IP, DDNS name, or Tailscale MagicDNS.
+    /// The agent still listens on all interfaces; the user must forward this port or use Tailscale. Empty = LAN/Tailscale
+    /// interface addresses only.
+    /// </summary>
+    public List<string> AdvertiseHosts { get; set; } = [];
     /// <summary>Shared secret handed to the phone over USB. Empty = generate a new one (forces re-pairing).</summary>
     public string? Token { get; set; }
     /// <summary>Separate key for the webhook API from other machines (push/notify/goto/refresh only). May appear in URLs.</summary>
@@ -325,7 +331,15 @@ public sealed class UpdateConfig
 {
     /// <summary>Install new GitHub releases automatically (phone app over USB, agent in place).</summary>
     public bool Auto { get; set; } = true;
+    /// <summary>GitHub <c>owner/name</c>, or a github.com URL that normalizes to that.</summary>
     public string Repo { get; set; } = "G-Tech-marksman/phonebox";
+    /// <summary>Optional branch: prefer a release whose <c>target_commitish</c> matches (else latest on the repo).</summary>
+    public string? Branch { get; set; }
+    /// <summary>
+    /// Optional GitHub personal access token for private repos / higher rate limits. Stored only in this PC's
+    /// settings file; never sent to the phone, never written to the agent log.
+    /// </summary>
+    public string? Token { get; set; }
 }
 
 public sealed class ClaudeConfig
@@ -672,6 +686,14 @@ public sealed partial class ConfigStore(string path)
         return true;
     }
 
+    /// <summary>Same for the GitHub updates PAT when a non-desktop client redacts it.</summary>
+    internal static bool PreserveUpdatesToken(AgentConfig? proposed, string? storedToken)
+    {
+        if (proposed?.Updates is not { Token: null } updates || storedToken is null) return false;
+        updates.Token = storedToken;
+        return true;
+    }
+
     private readonly Lock _lock = new();
     private AgentConfig _config = Normalize(new AgentConfig());
     private DateTime _stamp = DateTime.MinValue;
@@ -871,8 +893,14 @@ public sealed partial class ConfigStore(string path)
         c.OpenCode ??= new();
         c.OpenCode.TimeoutSec = Math.Clamp(c.OpenCode.TimeoutSec, 10, 3600);
         c.OpenCode.AlwaysCountdownSec = Math.Clamp(c.OpenCode.AlwaysCountdownSec, 0, 60);
-        if (string.IsNullOrWhiteSpace(c.Updates.Repo)) c.Updates.Repo = "G-Tech-marksman/phonebox";
+        c.Updates.Repo = UpdateService.NormalizeRepo(c.Updates.Repo) ?? "G-Tech-marksman/phonebox";
+        c.Updates.Branch = string.IsNullOrWhiteSpace(c.Updates.Branch) ? null
+            : Cap(c.Updates.Branch.Trim(), 200);
+        c.Updates.Token = string.IsNullOrWhiteSpace(c.Updates.Token) ? null
+            : new string(c.Updates.Token.Where(ch => !char.IsControl(ch)).ToArray()).Trim() is { Length: > 0 and <= 256 } tok
+                ? tok : null;
         c.Lan.Port = Math.Clamp(c.Lan.Port, 1024, 65535);
+        c.Lan.AdvertiseHosts = Lan.NormalizeAdvertiseHosts(c.Lan.AdvertiseHosts);
         if (string.IsNullOrWhiteSpace(c.Lan.Token)) c.Lan.Token = NewToken();
         if (string.IsNullOrWhiteSpace(c.Lan.WebhookToken)) c.Lan.WebhookToken = NewToken();
         c.Night.Brightness = Math.Clamp(c.Night.Brightness, 0.01, 1);

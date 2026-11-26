@@ -306,9 +306,15 @@ certificate, and trusts only that certificate. With USB, when the cable is unplu
 `https://<pc>:<port>` automatically (the Wi-Fi port from settings) and back to USB when it is plugged in again; the
 status line shows which one it uses.
 
-- The phone and the PC need to be on the same network. If they are not (separate Wi-Fi networks, another
-  building…), install [Tailscale](https://tailscale.com) on both: the agent offers its Tailscale address too.
-- Windows Firewall asks once when Wi-Fi is turned on; allow it for the network types you use.
+- **Same LAN:** the phone and the PC need to be on the same network. The agent offers its private addresses
+  automatically.
+- **Tailscale (recommended off-LAN):** install [Tailscale](https://tailscale.com) on the phone and the PC. The agent
+  offers its Tailscale (`100.x`) address; you can also put the MagicDNS name under **Remote hosts to advertise**.
+- **Public IP / DDNS / port forward:** under **Remote hosts to advertise**, enter your public IP or DDNS hostname
+  (one per line). Forward the chosen TCP **Port** on your router to this PC. Pair as usual (QR, Copy pairing link, or
+  **Connect with link or host** on the phone). The phone still uses TLS certificate pinning and the one-time claim
+  code — do not open the port without pairing. Allow the port in the PC firewall too.
+- Windows Firewall asks once when Wi-Fi is turned on; allow it for the network types you use (and Tailscale).
 - The screen stays on, so the phone still needs a charger — just not necessarily the PC.
 
 With several computers (each paired once over USB), the page overview on the phone lists them and switches between

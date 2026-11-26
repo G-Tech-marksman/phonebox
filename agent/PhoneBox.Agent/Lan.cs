@@ -63,6 +63,55 @@ public static class Lan
     }
 
     /// <summary>
+    /// Hosts put in the pairing payload: detected LAN/Tailscale addresses, then optional
+    /// <see cref="LanConfig.AdvertiseHosts"/> (public IP, DDNS, MagicDNS) the user typed for remote reachability.
+    /// </summary>
+    public static IReadOnlyList<string> AdvertisedHosts(LanConfig lan)
+    {
+        var auto = Addresses();
+        var extras = NormalizeAdvertiseHosts(lan.AdvertiseHosts)
+            .Where(h => !auto.Contains(h, StringComparer.OrdinalIgnoreCase));
+        return auto.Concat(extras).Take(8).ToList();
+    }
+
+    /// <summary>Whether a user-typed host may be advertised or used for remote pairing (IPv4 or DNS name).</summary>
+    public static bool IsAdvertiseHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        var h = host.Trim();
+        if (h.Length > 253 || h.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        if (IPAddress.TryParse(h, out var ip))
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            var b = ip.GetAddressBytes();
+            // loopback and link-local are never useful for a phone elsewhere
+            if (b[0] == 127 || (b[0] == 169 && b[1] == 254)) return false;
+            return true;
+        }
+        // DNS / Tailscale MagicDNS / DDNS — same shape the Android client accepts
+        if (h.Contains(' ') || h.StartsWith('-') || h.EndsWith('-') || h.EndsWith('.')) return false;
+        var labels = h.Split('.');
+        if (labels.Length < 1 || labels.Length > 127) return false;
+        foreach (var label in labels)
+        {
+            if (label.Length is < 1 or > 63) return false;
+            if (label[0] == '-' || label[^1] == '-') return false;
+            foreach (var ch in label)
+                if (!(char.IsAsciiLetterOrDigit(ch) || ch == '-')) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Dedupes and keeps at most eight valid advertise hosts from settings / JSON.</summary>
+    public static List<string> NormalizeAdvertiseHosts(IEnumerable<string>? hosts) =>
+        (hosts ?? [])
+            .SelectMany(line => (line ?? "").Split(['\n', '\r', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(IsAdvertiseHost)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+
+    /// <summary>
     /// Virtual adapters (Hyper-V, WSL, VMware, Bluetooth PAN) are skipped unless one owns an IPv4 default
     /// gateway: a Hyper-V external switch takes over the physical NIC's address and route, so dropping it
     /// would leave the pairing link with no usable host. Host-only and NAT virtual adapters have no

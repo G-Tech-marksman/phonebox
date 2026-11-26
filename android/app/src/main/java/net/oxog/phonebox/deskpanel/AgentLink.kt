@@ -265,10 +265,12 @@ class AgentLink(private val context: Context) {
         val order = hosts.indices.sortedBy { if (target == null && it == preferredHost) -1 else it }
         for (i in order) {
             try {
-                val c = URL("https://${hosts[i]}:$port$pathAndQuery").openConnection() as HttpsURLConnection
+                val host = hosts[i]
+                val c = URL("https://$host:$port$pathAndQuery").openConnection() as HttpsURLConnection
                 c.sslSocketFactory = f
                 c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
-                c.connectTimeout = 1500
+                // public / DDNS / MagicDNS need a longer connect than same-LAN or Tailscale CGNAT IPv4
+                c.connectTimeout = if (PairLink.isLocalAddress(host)) 1500 else 8_000
                 c.setRequestProperty("Authorization", "Bearer $token")
                 val r = send(c, method, readTimeout, body, contentType)
                 if (target == null) preferredHost = i
@@ -467,13 +469,15 @@ class AgentLink(private val context: Context) {
         val name = j.optString("pc")
         if (j.optBoolean("enabled")) {
             // add or refresh this computer and make it the active one
-            val hosts = j.getJSONArray("hosts")
+            val hosts = (0 until j.getJSONArray("hosts").length()).map { j.getJSONArray("hosts").getString(it) }
+                .filter { PairLink.isAllowedHost(it) }.take(8)
+            if (hosts.isEmpty()) return
             val fingerprint = j.getString("fingerprint")
             val reportedMacs = WakePacket.macsFrom(j.optJSONArray("macs"))
             synchronized(pcsLock) {
                 if (!closed) {
                     // an older agent sends no list: keep the MACs already stored instead of forgetting them
-                    val pc = Pc(fingerprint, name, (0 until hosts.length()).map { hosts.getString(it) }, j.getInt("port"), j.getString("token"),
+                    val pc = Pc(fingerprint, name, hosts, j.getInt("port"), j.getString("token"),
                         reportedMacs ?: pcs.firstOrNull { it.id == fingerprint }?.macs ?: emptyList())
                     savePcs(pcs.filter { it.id != pc.id && !(name.isNotEmpty() && it.name == name) } + pc, pc.id)
                 }
@@ -545,12 +549,12 @@ class AgentLink(private val context: Context) {
         companion object {
             private val FINGERPRINT = Regex("^[0-9a-f]{64}$")
             private val CODE = Regex("^[A-Za-z0-9_-]{16,64}$")
-            // DNS / Tailscale MagicDNS name the user typed; QR links still only advertise private IPv4 (see isLocalAddress).
+            // DNS / Tailscale MagicDNS / DDNS name the user typed or the agent advertised for remote reachability.
             private val HOSTNAME = Regex("^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$")
 
             /**
-             * Only the addresses the agent offers: private network (10/8, 172.16/12, 192.168/16) and Tailscale
-             * (100.64/10) IPv4. A link pointing anywhere else is not a PhoneBox pairing link.
+             * Private LAN (10/8, 172.16/12, 192.168/16) and Tailscale CGNAT (100.64/10) IPv4 — the agent's auto-detected
+             * addresses. Used for short timeouts and Wake-on-LAN eligibility; remote hosts use [isAllowedHost].
              */
             fun isLocalAddress(host: String): Boolean {
                 val p = host.split('.')
@@ -560,15 +564,18 @@ class AgentLink(private val context: Context) {
             }
 
             /**
-             * Hosts the user may type for manual pairing: the agent's private/Tailscale IPv4, or a DNS name
-             * (for example a Tailscale MagicDNS name). Rejects bare "localhost" and public-looking dotted quads.
+             * Hosts the phone may connect to: private/Tailscale IPv4, public IPv4 (port-forward / DDNS A record),
+             * or a DNS name (MagicDNS, DDNS). Rejects localhost, loopback and link-local.
              */
             fun isAllowedHost(host: String): Boolean {
                 val h = host.trim()
                 if (h.isEmpty() || h.equals("localhost", ignoreCase = true)) return false
-                if (isLocalAddress(h)) return true
-                // a dotted quad that isLocalAddress rejected is a public or malformed IPv4 — do not accept it as DNS
-                if (h.split('.').size == 4 && h.split('.').all { it.toIntOrNull() != null }) return false
+                val p = h.split('.')
+                if (p.size == 4 && p.all { it.toIntOrNull()?.let { n -> it.length in 1..3 && n in 0..255 } == true }) {
+                    val b = p.map { it.toInt() }
+                    if (b[0] == 127 || (b[0] == 169 && b[1] == 254)) return false
+                    return true
+                }
                 return HOSTNAME.matches(h)
             }
 
@@ -600,8 +607,8 @@ class AgentLink(private val context: Context) {
                 val fp = q["fp"]?.lowercase()?.takeIf { FINGERPRINT.matches(it) } ?: return null
                 val port = q["port"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
                 val code = q["c"]?.takeIf { CODE.matches(it) } ?: return null
-                // QR / copied links only carry private IPv4; a pasted link with a user-typed hostname uses fromFields.
-                val hosts = q["h"].orEmpty().split(',').map { it.trim() }.filter { isLocalAddress(it) }.take(8)
+                // LAN/Tailscale auto addresses plus optional public IP / DDNS / MagicDNS from the agent's advertise list
+                val hosts = q["h"].orEmpty().split(',').map { it.trim() }.filter { isAllowedHost(it) }.take(8)
                 if (hosts.isEmpty()) return null
                 val pc = q["pc"].orEmpty().filter { it >= ' ' }.take(64).ifBlank { "your computer" }
                 return PairLink(pc, fp, port, hosts, code)
@@ -614,12 +621,14 @@ class AgentLink(private val context: Context) {
             }
 
             /**
-             * Hosts allowed for an https pairing landing page: this PC's private/Tailscale address (agent-served
-             * /pair/), or this fork's GitHub Pages. Owner github.io is not used for new links.
+             * Hosts allowed for an https pairing landing page: agent-served /pair/ on any allowed address
+             * (LAN, Tailscale, public/DDNS), or this fork's GitHub Pages. Owner github.io is not used for new links.
              */
             fun isPairHttpHost(host: String?): Boolean {
                 if (host.isNullOrBlank()) return false
-                if (isLocalAddress(host)) return true
+                // This fork does not open owner GitHub Pages pairing links.
+                if (host.equals("ersinkoc.github.io", ignoreCase = true)) return false
+                if (isAllowedHost(host)) return true
                 return host.equals("g-tech-marksman.github.io", ignoreCase = true)
             }
 
@@ -683,12 +692,14 @@ class AgentLink(private val context: Context) {
         var problem: PairFailure = PairFailure.Unreachable(link.pc, link.hosts)
         for (host in link.hosts) {
             try {
+                val remote = !PairLink.isLocalAddress(host)
                 val c = URL("https://$host:${link.port}/api/pair/claim").openConnection() as HttpsURLConnection
                 c.instanceFollowRedirects = false
                 c.sslSocketFactory = pinned
                 c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
-                c.connectTimeout = 3000
-                c.readTimeout = 8000
+                // WAN / DDNS needs more time than same-LAN; TLS pin still authenticates the PC
+                c.connectTimeout = if (remote) 12_000 else 3000
+                c.readTimeout = if (remote) 15_000 else 8000
                 c.requestMethod = "POST"
                 c.doOutput = true
                 c.setRequestProperty("Content-Type", "application/json")
@@ -701,9 +712,9 @@ class AgentLink(private val context: Context) {
                 }
                 val j = JSONObject(c.inputStream.bufferedReader().readText())
                 if (!j.optString("fingerprint").equals(link.fingerprint, ignoreCase = true)) return PairFailure.WrongCertificate(link.pc)
-                // keep any host the user typed (MagicDNS, a specific address) first; then the agent's private IPv4 list
+                // keep hosts the user typed / link carried first; then the agent's LAN + advertised remote list
                 val fromAgent = j.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.getString(it) } }
-                    ?.filter { PairLink.isLocalAddress(it) } ?: emptyList()
+                    ?.filter { PairLink.isAllowedHost(it) } ?: emptyList()
                 val hosts = (link.hosts + fromAgent).distinct().take(8).ifEmpty { link.hosts }
                 // the name the user confirmed; only an entry for this very certificate is replaced, never one that
                 // merely has the same name

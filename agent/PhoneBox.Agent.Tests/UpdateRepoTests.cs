@@ -1,0 +1,47 @@
+using PhoneBox.Agent;
+using Xunit;
+
+public sealed class UpdateRepoTests
+{
+    [Theory]
+    [InlineData("G-Tech-marksman/phonebox", "G-Tech-marksman/phonebox")]
+    [InlineData("https://github.com/G-Tech-marksman/phonebox", "G-Tech-marksman/phonebox")]
+    [InlineData("https://github.com/G-Tech-marksman/phonebox/", "G-Tech-marksman/phonebox")]
+    [InlineData("https://github.com/G-Tech-marksman/phonebox/tree/main", "G-Tech-marksman/phonebox")]
+    [InlineData("github.com/foo/bar", "foo/bar")]
+    [InlineData("  owner/name  ", "owner/name")]
+    public void NormalizeRepoAcceptsOwnerNameAndUrls(string input, string expected) =>
+        Assert.Equal(expected, UpdateService.NormalizeRepo(input));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("noslash")]
+    [InlineData("a/b/c")]
+    [InlineData("https://gitlab.com/owner/name")]
+    [InlineData("https://github.com/onlyowner")]
+    public void NormalizeRepoRejectsJunk(string input) =>
+        Assert.Null(UpdateService.NormalizeRepo(input));
+}
+
+public sealed class LanAdvertiseTests
+{
+    [Fact]
+    public void AdvertiseHostsAcceptPublicDnsAndRejectLoopback()
+    {
+        Assert.True(Lan.IsAdvertiseHost("203.0.113.10"));
+        Assert.True(Lan.IsAdvertiseHost("home.example.com"));
+        Assert.True(Lan.IsAdvertiseHost("desk.tail1234.ts.net"));
+        Assert.True(Lan.IsAdvertiseHost("192.168.1.10"));
+        Assert.False(Lan.IsAdvertiseHost("127.0.0.1"));
+        Assert.False(Lan.IsAdvertiseHost("localhost"));
+        Assert.False(Lan.IsAdvertiseHost("169.254.1.1"));
+        Assert.False(Lan.IsAdvertiseHost(""));
+    }
+
+    [Fact]
+    public void NormalizeAdvertiseHostsDedupesAndCaps()
+    {
+        var list = Lan.NormalizeAdvertiseHosts(["home.example.com", " home.example.com ", "203.0.113.10", "127.0.0.1", "a,b"]);
+        Assert.Equal(["home.example.com", "203.0.113.10", "a", "b"], list);
+    }
+}
