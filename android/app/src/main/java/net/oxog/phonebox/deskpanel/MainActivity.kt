@@ -35,8 +35,13 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.text.InputType
+import android.util.TypedValue
 import android.webkit.JavascriptInterface
 import android.webkit.ConsoleMessage
 import android.webkit.WebResourceRequest
@@ -497,21 +502,58 @@ class MainActivity : Activity(), SensorEventListener {
     private fun handlePairingLink(intent: Intent?) {
         val pairing = AgentLink.PairLink.parse(intent?.data) ?: return
         intent?.data = null // not again after a configuration change
-        val context = pairingContext()
-        AlertDialog.Builder(this)
-            .setTitle(context.getString(R.string.pair_title))
-            .setMessage(context.getString(R.string.pair_message, pairing.pc, pairing.hosts.joinToString(), pairing.port, pairing.check))
-            .setPositiveButton(context.getString(R.string.pair_positive)) { _, _ -> pair(pairing, context) }
-            .setNegativeButton(context.getString(R.string.pair_negative), null)
-            .setOnDismissListener { hideSystemUi() }
-            .show()
-            .pairingButtons(context)
+        confirmPair(pairing)
     }
 
     /** Dialog buttons as written: the default all-caps follows the phone's language ("PAİR" on a Turkish phone). */
     private fun AlertDialog.pairingButtons(context: Context): AlertDialog = apply {
         window?.decorView?.layoutDirection = context.resources.configuration.layoutDirection
-        listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE).forEach { getButton(it)?.isAllCaps = false }
+        listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)
+            .forEach { getButton(it)?.isAllCaps = false }
+    }
+
+    private fun confirmPair(pairing: AgentLink.PairLink) {
+        val context = pairingContext()
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val body = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_message_lead, pairing.pc, pairing.hosts.joinToString(), pairing.port)
+            })
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_check_label)
+                setPadding(0, pad / 2, 0, pad / 4)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            })
+            // Selectable / tap-to-copy confirm code so it matches the computer pairing window clearly.
+            addView(TextView(context).apply {
+                text = pairing.check
+                setTextIsSelectable(true)
+                typeface = android.graphics.Typeface.MONOSPACE
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                gravity = Gravity.CENTER
+                setPadding(pad / 2, pad / 2, pad / 2, pad / 2)
+                setBackgroundColor(0x221E293B)
+                setOnClickListener {
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("pair-check", pairing.check))
+                    Toast.makeText(context, context.getString(R.string.pair_copied), Toast.LENGTH_SHORT).show()
+                }
+            })
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_message_tail)
+                setPadding(0, pad / 2, 0, 0)
+            })
+        }
+        AlertDialog.Builder(this)
+            .setTitle(context.getString(R.string.pair_title))
+            .setView(body)
+            .setPositiveButton(context.getString(R.string.pair_positive)) { _, _ -> pair(pairing, context) }
+            .setNegativeButton(context.getString(R.string.pair_negative), null)
+            .setOnDismissListener { hideSystemUi() }
+            .show()
+            .pairingButtons(context)
     }
 
     private fun pair(pairing: AgentLink.PairLink, context: Context) {
@@ -529,6 +571,114 @@ class MainActivity : Activity(), SensorEventListener {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Manual Wi-Fi pairing when the camera cannot open the QR link: paste the computer's pairing URL, or type the
+     * host, the agent's Wi-Fi listen port, certificate fingerprint and one-time code. Same claim protocol as the QR.
+     */
+    private fun showManualPairDialog() {
+        if (isFinishing || isDestroyed) return
+        val context = pairingContext()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        fun label(text: String) = TextView(context).apply {
+            this.text = text
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(0, dp(10), 0, dp(4))
+        }
+        fun field(hint: String, inputType: Int, singleLine: Boolean = true) = EditText(context).apply {
+            this.hint = hint
+            this.inputType = inputType
+            if (singleLine) setSingleLine()
+            else { minLines = 2; maxLines = 4 }
+        }
+
+        val linkField = field(context.getString(R.string.pair_manual_link_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, singleLine = false)
+        val hostField = field(context.getString(R.string.pair_manual_host_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val portField = field(context.getString(R.string.pair_manual_port_hint), InputType.TYPE_CLASS_NUMBER).apply { setText("1766") }
+        val fingerprintField = field(context.getString(R.string.pair_manual_fp_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        val codeField = field(context.getString(R.string.pair_manual_code_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        val nameField = field(context.getString(R.string.pair_manual_name_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
+
+        val form = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+            addView(TextView(context).apply {
+                text = context.getString(R.string.pair_manual_lead)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            })
+            addView(label(context.getString(R.string.pair_manual_link)))
+            addView(linkField)
+            addView(label(context.getString(R.string.pair_manual_or_fields)))
+            addView(label(context.getString(R.string.pair_manual_host)))
+            addView(hostField)
+            addView(label(context.getString(R.string.pair_manual_port)))
+            addView(portField)
+            addView(label(context.getString(R.string.pair_manual_fp)))
+            addView(fingerprintField)
+            addView(label(context.getString(R.string.pair_manual_code)))
+            addView(codeField)
+            addView(label(context.getString(R.string.pair_manual_name)))
+            addView(nameField)
+        }
+        val scroll = ScrollView(context).apply { addView(form) }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(context.getString(R.string.pair_manual_title))
+            .setView(scroll)
+            .setPositiveButton(context.getString(R.string.pair_manual_connect), null) // set below so invalid input keeps the dialog open
+            .setNeutralButton(context.getString(R.string.pair_manual_update), null)
+            .setNegativeButton(context.getString(R.string.pair_negative), null)
+            .setOnDismissListener { hideSystemUi() }
+            .show()
+            .pairingButtons(context)
+
+        fun typedHost() = hostField.text?.toString()?.trim().orEmpty()
+        fun typedPort() = portField.text?.toString()?.trim()?.toIntOrNull()
+        fun typedFp() = fingerprintField.text?.toString().orEmpty()
+        fun typedCode() = codeField.text?.toString().orEmpty()
+        fun typedName() = nameField.text?.toString().orEmpty()
+
+        fun resolvePairing(): AgentLink.PairLink? {
+            val pasted = AgentLink.PairLink.parse(linkField.text?.toString())
+            val host = typedHost()
+            val port = typedPort()
+            if (pasted != null) {
+                val overrideHosts = host.takeIf { AgentLink.PairLink.isAllowedHost(it) }?.let { listOf(it) }
+                return pasted.withEndpoint(overrideHosts, port)
+            }
+            return AgentLink.PairLink.fromFields(host, port ?: return null, typedFp(), typedCode(), typedName())
+        }
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val pairing = resolvePairing()
+            if (pairing == null) {
+                Toast.makeText(context, context.getString(R.string.pair_manual_invalid), Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            dialog.dismiss()
+            confirmPair(pairing)
+        }
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            // Already paired: retarget host/port for a stored certificate without inventing a new key.
+            val host = typedHost()
+            val port = typedPort()
+            val fp = typedFp().ifBlank {
+                AgentLink.PairLink.parse(linkField.text?.toString())?.fingerprint.orEmpty()
+            }
+            if (host.isEmpty() || port == null || fp.isBlank()) {
+                Toast.makeText(context, context.getString(R.string.pair_manual_update_need), Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            if (!link.updateEndpoint(fp, listOf(host), port)) {
+                Toast.makeText(context, context.getString(R.string.pair_manual_update_missing), Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            dialog.dismiss()
+            Toast.makeText(context, context.getString(R.string.pair_manual_update_done), Toast.LENGTH_LONG).show()
+            stream.stop(); if (resumed) stream.start(); if (hasWeb) web.reload()
+        }
     }
 
     /**
@@ -971,6 +1121,13 @@ class MainActivity : Activity(), SensorEventListener {
 
         @JavascriptInterface
         fun cancelListening(key: String, id: Int) { if (ok(key) && id > 0) dictation.cancel(id) }
+
+        /** Offline screen: open the paste-link / host+port pairing form (same claim protocol as the QR). */
+        @JavascriptInterface
+        fun openManualPair(key: String) {
+            if (!ok(key)) return
+            runOnUiThread { showManualPairDialog() }
+        }
     }
 
     companion object {

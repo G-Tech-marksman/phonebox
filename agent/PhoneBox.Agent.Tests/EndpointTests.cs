@@ -8,10 +8,13 @@ public sealed class EndpointTests
     {
         var standard = AgentEndpoint.FromArgs([]);
         var isolated = AgentEndpoint.FromArgs(["--config", "test.json", "--port", "18765"]);
-        Assert.Equal(8765, standard.Port);
-        Assert.Equal(@"Local\PhoneBox.Agent", standard.MutexName);
+        Assert.Equal(LanConfig.FixedPort, standard.Port);
+        Assert.Equal(@"Local\PhoneBox.Agent.1766", standard.MutexName);
+        Assert.Equal($"http://127.0.0.1:{LanConfig.FixedPort}/", standard.SettingsUrl);
         Assert.Equal("http://127.0.0.1:18765/", isolated.SettingsUrl);
+        Assert.Equal(@"Local\PhoneBox.Agent", new AgentEndpoint(8765).MutexName);
         Assert.NotEqual(standard.MutexName, isolated.MutexName);
+        Assert.NotEqual(standard.MutexName, new AgentEndpoint(8765).MutexName);
     }
 
     [Theory]

@@ -145,7 +145,7 @@ Ekran görüntüleri demo verileri kullanır. [Şablon galerisi ve widget'lara g
 
 ## Güvenlik ve gizlilik
 
-Masaüstü ayar sunucusu `127.0.0.1:8765` adresini dinler; USB bağlantısı `adb reverse` üzerinden ulaşır. İsteğe bağlı Wi-Fi bağlantısı 8766 portunda sabitlenmiş sertifika ve eşleştirilmiş anahtarla HTTPS kullanır. Ayarlar ve eşleştirme uç noktaları yerel kalır. PhoneBox kendi telemetri, analiz veya hesap sistemine sahip değildir. Ayrıntılar için [gizlilik politikasına](../PRIVACY.md) ve [SECURITY.md](../SECURITY.md) dosyasına bakın.
+Masaüstü ayar sunucusu `127.0.0.1:8765` adresini dinler; USB bağlantısı `adb reverse` üzerinden ulaşır. İsteğe bağlı Wi-Fi bağlantısı 1766 portunda sabitlenmiş sertifika ve eşleştirilmiş anahtarla HTTPS kullanır. Ayarlar ve eşleştirme uç noktaları yerel kalır. PhoneBox kendi telemetri, analiz veya hesap sistemine sahip değildir. Ayrıntılar için [gizlilik politikasına](../PRIVACY.md) ve [SECURITY.md](../SECURITY.md) dosyasına bakın.
 
 ## Geliştirme
 

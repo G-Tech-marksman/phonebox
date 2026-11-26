@@ -76,17 +76,28 @@ public sealed class PairingCodes
         return code is { Length: > 0 and <= 64 } ? code : null;
     }
 
-    /// <summary>
-    /// The link in the QR code. Everything is in the fragment (after <c>#</c>), which browsers never send to a server,
-    /// so opening the link in a browser instead of the app does not leak the code to the web page's host.
-    /// </summary>
-    public static string Link(string pc, string fingerprint, int port, IEnumerable<string> hosts, string code) =>
-        "https://ersinkoc.github.io/phonebox/pair/#v=1"
+    /// <summary>Query/fragment payload shared by <see cref="Link"/> and <see cref="PageLink"/>.</summary>
+    public static string Payload(string pc, string fingerprint, int port, IEnumerable<string> hosts, string code) =>
+        "v=1"
         + "&pc=" + Uri.EscapeDataString(pc)
         + "&fp=" + fingerprint
         + "&port=" + port
         + "&h=" + string.Join(",", hosts.Select(Uri.EscapeDataString))
         + "&c=" + code;
+
+    /// <summary>
+    /// The link in the QR code and "Copy pairing link". Opens the PhoneBox app directly (<c>phonebox://pair</c>) so
+    /// pairing does not depend on a third-party GitHub Pages host.
+    /// </summary>
+    public static string Link(string pc, string fingerprint, int port, IEnumerable<string> hosts, string code) =>
+        "phonebox://pair?" + Payload(pc, fingerprint, port, hosts, code);
+
+    /// <summary>
+    /// Landing page served by this agent on its Wi-Fi HTTPS port. Secrets stay in the fragment (after <c>#</c>), which
+    /// browsers never send to the server. Used when a camera or browser needs an <c>https://</c> URL on your own PC.
+    /// </summary>
+    public static string PageLink(string host, int listenPort, string pc, string fingerprint, int port, IEnumerable<string> hosts, string code) =>
+        "https://" + host + ":" + listenPort + "/pair/#" + Payload(pc, fingerprint, port, hosts, code);
 
     /// <summary>
     /// The start of the certificate fingerprint ("AB12 CD34"): the settings page shows it next to the QR code and the
@@ -101,5 +112,18 @@ public sealed class PairingCodes
         using var generator = new QRCodeGenerator();
         using var data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.M);
         return new SvgQRCode(data).GetGraphic(8, "#000000", "#ffffff", drawQuietZones: true);
+    }
+
+    /// <summary>
+    /// Public APK URL put in the pairing download QR. This fork publishes a stable asset on the
+    /// <c>apk-manual-pair-3124</c> release (<c>PhoneBox.apk</c>); upstream-style semver names are used otherwise.
+    /// </summary>
+    public static string ApkDownloadUrl(string repo, string version)
+    {
+        repo = repo.Trim().Trim('/');
+        if (repo.Equals("G-Tech-marksman/phonebox", StringComparison.OrdinalIgnoreCase))
+            return "https://github.com/G-Tech-marksman/phonebox/releases/download/apk-manual-pair-3124/PhoneBox.apk";
+        var v = version.Trim().TrimStart('v');
+        return $"https://github.com/{repo}/releases/download/v{v}/PhoneBox-{v}.apk";
     }
 }

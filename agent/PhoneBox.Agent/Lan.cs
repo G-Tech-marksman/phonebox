@@ -63,6 +63,103 @@ public static class Lan
     }
 
     /// <summary>
+    /// IPv4 addresses (non-loopback, non-link-local) to bind the Wi-Fi HTTPS listener on when Settings HTTP already
+    /// owns <c>127.0.0.1:&lt;port&gt;</c> on the same port. Includes LAN, Tailscale, VPN, and public NIC addresses so
+    /// port-forward / VPN paths still reach the agent without binding <c>0.0.0.0</c> (which would conflict with loopback HTTP).
+    /// </summary>
+    public static IReadOnlyList<IPAddress> WifiBindAddresses()
+    {
+        var list = new List<IPAddress>();
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+            var desc = ni.Description + " " + ni.Name;
+            var isTailscale = desc.Contains("Tailscale", StringComparison.OrdinalIgnoreCase);
+            var props = ni.GetIPProperties();
+            var hasGateway = props.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
+            if (!isTailscale && ShouldSkipAdapter(desc, hasGateway)) continue;
+            foreach (var ua in props.UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                var b = ua.Address.GetAddressBytes();
+                if (b[0] == 127 || (b[0] == 169 && b[1] == 254)) continue;
+                list.Add(ua.Address);
+            }
+        }
+        return list.Distinct().ToList();
+    }
+
+    /// <summary>True when a TCP bind to <paramref name="ip"/>:<paramref name="port"/> succeeds (then released).</summary>
+    public static bool TryProbeBind(IPAddress ip, int port)
+    {
+        try
+        {
+            using var s = new Socket(ip.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            s.ExclusiveAddressUse = true;
+            s.Bind(new IPEndPoint(ip, port));
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Addresses from <see cref="WifiBindAddresses"/> that currently accept a TCP bind on <paramref name="port"/>.</summary>
+    public static IReadOnlyList<IPAddress> WifiBindAddressesThatBind(int port) =>
+        WifiBindAddresses().Where(ip => TryProbeBind(ip, port)).ToList();
+
+    /// <summary>
+    /// Hosts put in the pairing payload. User-typed <see cref="LanConfig.AdvertiseHosts"/> (public IP, DDNS,
+    /// MagicDNS, VPN hostname) come first so they are never truncated by many LAN adapters and so a phone on VPN
+    /// tries the remote name before private IPs it cannot reach.
+    /// </summary>
+    public static IReadOnlyList<string> AdvertisedHosts(LanConfig lan)
+    {
+        var auto = Addresses();
+        var extras = NormalizeAdvertiseHosts(lan.AdvertiseHosts);
+        // Remote hosts first (dedupe case-insensitively), then auto LAN/Tailscale, capped at eight.
+        return extras
+            .Concat(auto.Where(h => !extras.Contains(h, StringComparer.OrdinalIgnoreCase)))
+            .Take(8)
+            .ToList();
+    }
+
+    /// <summary>Whether a user-typed host may be advertised or used for remote pairing (IPv4 or DNS name).</summary>
+    public static bool IsAdvertiseHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        var h = host.Trim();
+        if (h.Length > 253 || h.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        if (IPAddress.TryParse(h, out var ip))
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            var b = ip.GetAddressBytes();
+            // loopback and link-local are never useful for a phone elsewhere
+            if (b[0] == 127 || (b[0] == 169 && b[1] == 254)) return false;
+            return true;
+        }
+        // DNS / Tailscale MagicDNS / DDNS — same shape the Android client accepts
+        if (h.Contains(' ') || h.StartsWith('-') || h.EndsWith('-') || h.EndsWith('.')) return false;
+        var labels = h.Split('.');
+        if (labels.Length < 1 || labels.Length > 127) return false;
+        foreach (var label in labels)
+        {
+            if (label.Length is < 1 or > 63) return false;
+            if (label[0] == '-' || label[^1] == '-') return false;
+            foreach (var ch in label)
+                if (!(char.IsAsciiLetterOrDigit(ch) || ch == '-')) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Dedupes and keeps at most eight valid advertise hosts from settings / JSON.</summary>
+    public static List<string> NormalizeAdvertiseHosts(IEnumerable<string>? hosts) =>
+        (hosts ?? [])
+            .SelectMany(line => (line ?? "").Split(['\n', '\r', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(IsAdvertiseHost)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+
+    /// <summary>
     /// Virtual adapters (Hyper-V, WSL, VMware, Bluetooth PAN) are skipped unless one owns an IPv4 default
     /// gateway: a Hyper-V external switch takes over the physical NIC's address and route, so dropping it
     /// would leave the pairing link with no usable host. Host-only and NAT virtual adapters have no
@@ -107,16 +204,25 @@ public static class Lan
     /// </summary>
     public static bool IsPairingClaim(string method, PathString path) => method == "POST" && path == "/api/pair/claim";
 
+    /// <summary>
+    /// Static pairing landing page on this agent (secrets stay in the URL fragment and never reach the server).
+    /// Served without the phone key so a camera can open <c>https://&lt;pc&gt;:&lt;port&gt;/pair/#…</c> before pairing.
+    /// </summary>
+    public static bool IsPairPage(string method, PathString path) =>
+        HttpMethods.IsGet(method) && (path == "/pair" || path == "/pair/" || path == "/pair/index.html");
+
     /// <summary>The webhook API: other machines on the network (or Tailscale) may push data with the same token.</summary>
     public static bool IsWebhook(PathString path) =>
         path.StartsWithSegments("/api/push") || path.StartsWithSegments("/api/notify")
         || path.StartsWithSegments("/api/goto") || path.StartsWithSegments("/api/refresh");
 
-    internal enum LanAccess { Denied, Phone, Webhook, PairingClaim }
+    internal enum LanAccess { Denied, Phone, Webhook, PairingClaim, PairPage }
 
     internal static LanAccess AuthorizeRequest(LanConfig lan, string method, PathString path, string origin, string? authorization, string? queryToken)
     {
-        if (!lan.Enabled || origin != "" || !AllowedOverLan(path)) return LanAccess.Denied;
+        if (!lan.Enabled || origin != "") return LanAccess.Denied;
+        if (IsPairPage(method, path)) return LanAccess.PairPage;
+        if (!AllowedOverLan(path)) return LanAccess.Denied;
         // A hand-edited config can give both keys the same value. Every webhook sender then holds the phone key too,
         // and the agent cannot tell them apart, so that value is not trusted as a phone key until one of them changes.
         var sharedKey = string.Equals(lan.Token, lan.WebhookToken, StringComparison.Ordinal);
@@ -126,6 +232,28 @@ public static class Lan
             return LanAccess.Webhook;
         if (IsPairingClaim(method, path)) return LanAccess.PairingClaim;
         return LanAccess.Denied;
+    }
+
+    /// <summary>
+    /// Host header allowed for the Settings UI when listening on all interfaces (loopback, LAN IP, VPN hostname).
+    /// </summary>
+    public static bool IsAllowedSettingsHost(string? host, LanConfig lan)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        var h = host.Trim().TrimEnd('.');
+        if (h.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) || h.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (IPAddress.TryParse(h, out var ip))
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            var b = ip.GetAddressBytes();
+            if (b[0] == 127) return true;
+            if (b[0] == 169 && b[1] == 254) return false; // link-local
+            // Any other IPv4: LAN / VPN / public NIC — Settings is intentionally reachable off-loopback on this fork.
+            return true;
+        }
+        if (AdvertisedHosts(lan).Any(a => a.Equals(h, StringComparison.OrdinalIgnoreCase))) return true;
+        return IsAdvertiseHost(h);
     }
 
     public static IPAddress Any => IPAddress.Any;

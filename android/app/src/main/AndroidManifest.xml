@@ -44,13 +44,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Pairing without USB: the QR code on the computer's settings page. Android 12+ opens unverified https
-                 links in the browser; that page then offers phonebox://pair (the second filter). -->
+            <!-- Pairing without USB: QR / Copy use phonebox://pair. Optional https landing page is served by this
+                 fork's agent (or GitHub Pages); the page then offers phonebox://pair. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="ersinkoc.github.io" android:pathPrefix="/phonebox/pair" />
+                <data android:scheme="https" android:host="g-tech-marksman.github.io" android:pathPrefix="/phonebox/pair" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

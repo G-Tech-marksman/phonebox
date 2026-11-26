@@ -63,7 +63,7 @@ export const $ = (id) => document.getElementById(id);
 // The native bridge (window.Android) is in every frame, sandboxed widgets included, so each call carries a key that only
 // the panel's own frames receive (MainActivity.bridgeKey). This wrapper adds it.
 const BRIDGE = ['battery', 'buzz', 'haptic', 'is24Hour', 'pcs', 'selectPc', 'forgetPc', 'setBrightness', 'setHomeScreen', 'setOrientation',
-  'setPinned', 'setVolumeKeys', 'setStandby', 'setLanguage', 'transport', 'sensors', 'version', 'canListen', 'listen', 'stopListening', 'cancelListening', 'trackpad', 'canWake', 'wakePc'];
+  'setPinned', 'setVolumeKeys', 'setStandby', 'setLanguage', 'transport', 'sensors', 'version', 'canListen', 'listen', 'stopListening', 'cancelListening', 'trackpad', 'canWake', 'wakePc', 'openManualPair'];
 export const bridge = typeof Android === 'undefined' ? null : Object.fromEntries(BRIDGE.filter((m) => typeof Android[m] === 'function')
   .map((m) => [m, (...args) => Android[m](window.__phoneboxKey || '', ...args)]));
 // Live preview inside the agent's layout editor: the layout comes from the editor (unsaved), not from the agent.
@@ -2667,6 +2667,12 @@ function wakeRender() {
   btn.disabled = waited < WAKE_COOLDOWN_MS;
   box.querySelector('.note').textContent = wakeAt && !waking ? t('panel.wakeFailed') : '';
 }
+function manualPairRender() {
+  const box = $('manualPair');
+  if (!box) return;
+  const offline = document.body.classList.contains('offline');
+  box.hidden = !(offline && bridge?.openManualPair);
+}
 $('wake')?.querySelector('button').addEventListener('click', () => {
   if (Date.now() - wakeAt < WAKE_COOLDOWN_MS) return;
   const pc = pairedPcs().find((p) => p.active);
@@ -2678,11 +2684,17 @@ $('wake')?.querySelector('button').addEventListener('click', () => {
   } else toast(t('panel.wakeFailed'), 'err');
   wakeRender();
 });
+$('manualPair')?.querySelector('button').addEventListener('click', () => {
+  if (!bridge?.openManualPair) return;
+  haptic();
+  bridge.openManualPair();
+});
 
 export function setOnline(on) {
   document.body.classList.toggle('offline', !on);
   if (on) { wakeAt = 0; clearInterval(wakeTicker); wakeTicker = 0; }
   wakeRender();
+  manualPairRender();
   if (on && online !== true) { loadConfig(); loadQuotas(); loadWork(); loadPush(); loadApprovals(); loadCalendar(); }
   const changed = online !== on;
   if (!on && changed) unreachableSince = unreachableSince || Date.now();

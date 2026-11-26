@@ -13,7 +13,7 @@ is read and thrown away, never parsed. Only the Python standard library is used.
 
 Settings (environment variables):
     PHONEBOX_URL                http://127.0.0.1:8765 (default; Windows, macOS, Linux, WSL2 with mirrored networking)
-                                or https://<windows-host>:8766 (WSL2 with NAT networking, through the Wi-Fi port)
+                                or https://<windows-host>:1766 (WSL2 with NAT networking, through the Wi-Fi port)
     PHONEBOX_WEBHOOK_KEY        the webhook key, needed for https only ...
     PHONEBOX_WEBHOOK_KEY_FILE   ... or a file holding it (default ~/.config/phonebox/webhook-key)
     PHONEBOX_CERT_SHA256        the SHA-256 fingerprint of the agent's certificate, needed for https
@@ -61,7 +61,7 @@ def target():
     url = urlsplit(setting("PHONEBOX_URL", "http://127.0.0.1:8765"))
     host = url.hostname or ""
     if url.scheme not in ("http", "https") or not host or url.path not in ("", "/") or url.query or url.username:
-        raise BridgeError("PHONEBOX_URL must look like http://127.0.0.1:8765 or https://<windows-host>:8766")
+        raise BridgeError("PHONEBOX_URL must look like http://127.0.0.1:8765 or https://<windows-host>:1766")
     port = url.port or (443 if url.scheme == "https" else 80)
     if url.scheme == "http":
         # Plain HTTP only reaches the agent on this machine, which needs no key; the key never travels unencrypted.
@@ -70,7 +70,7 @@ def target():
         except ValueError:
             loopback = False
         if not loopback:
-            raise BridgeError("other machines are reached over https (port 8766); http is for 127.0.0.1 only")
+            raise BridgeError("other machines are reached over https (port 1766); http is for 127.0.0.1 only")
         return host, port, None, None
     pin = re.sub(r"[\s:]", "", setting("PHONEBOX_CERT_SHA256")).lower()
     if not re.fullmatch(r"[0-9a-f]{64}", pin):

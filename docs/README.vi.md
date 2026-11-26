@@ -173,7 +173,7 @@ Các [tiện ích bổ sung cho UMIDIGI BISON](../extras/umidigi-bison) chứa b
 ## Bảo mật & quyền riêng tư
 
 Máy chủ cài đặt trên máy tính lắng nghe tại `127.0.0.1:8765`; USB truy cập tới nó qua `adb reverse`.
-Wi-Fi tùy chọn dùng HTTPS trên cổng 8766 với chứng chỉ được ghim cố định và khóa đã ghép nối. Các endpoint cài đặt và ghép nối
+Wi-Fi tùy chọn dùng HTTPS trên cổng 1766 với chứng chỉ được ghim cố định và khóa đã ghép nối. Các endpoint cài đặt và ghép nối
 luôn ở cục bộ. Điện thoại yêu cầu các hành động đã cấu hình theo ID; lệnh và thông tin đăng nhập của các tích hợp luôn nằm trên máy tính.
 
 PhoneBox không có hệ thống đo lường từ xa (telemetry), phân tích hay tài khoản riêng. Các widget và tích hợp tùy chọn sẽ liên hệ với

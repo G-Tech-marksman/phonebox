@@ -1,10 +1,20 @@
 namespace PhoneBox.Agent;
 
 /// <summary>A separate local port allows development checks beside an installed agent.</summary>
-public sealed record AgentEndpoint(int Port = 8765)
+public sealed record AgentEndpoint(int Port = LanConfig.FixedPort)
 {
+    /// <summary>Local Settings UI (HTTP on loopback). Same TCP port as Wi-Fi HTTPS on non-loopback addresses.</summary>
     public string SettingsUrl => $"http://127.0.0.1:{Port}/";
-    public string MutexName => Port == 8765 ? @"Local\PhoneBox.Agent" : $@"Local\PhoneBox.Agent.{Port}";
+
+    /// <summary>
+    /// Distinct from the legacy 8765 mutex so an orphaned old agent (or abandoned mutex) on 8765 cannot make the
+    /// 1766 instance exit before it listens — that looked like "The agent did not answer" in setup.
+    /// </summary>
+    public string MutexName => Port == LanConfig.FixedPort
+        ? @"Local\PhoneBox.Agent.1766"
+        : Port == 8765
+            ? @"Local\PhoneBox.Agent"
+            : $@"Local\PhoneBox.Agent.{Port}";
 
     public static AgentEndpoint FromArgs(string[] args)
     {

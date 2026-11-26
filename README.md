@@ -77,21 +77,22 @@ works without either. Release agents include .NET, so you do not need to install
 
 ### 1. Install the desktop agent
 
-**Windows 10/11 x64** — paste into a normal PowerShell window:
+**Windows 10/11 x64** — paste into a normal PowerShell window (this fork; pulls agent releases from **G-Tech-marksman/phonebox**):
 
 ```powershell
-irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1 | iex
+irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1 | iex
 ```
 
 **Linux or macOS** — run as your own user:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 ```
 
-Setup downloads the latest release, checks its SHA-256 checksum, offers missing dependencies and start-at-login,
-and opens the settings at <http://127.0.0.1:8765>. It can also install the Android app over USB.
+Setup downloads the latest agent release from this fork, checks its SHA-256 checksum, offers missing dependencies and start-at-login,
+and opens the settings at <http://127.0.0.1:1766>. It can also install the Android app over USB.
 Run setup again to update or repair the installation while keeping settings and pairings.
+Override the release repo with `-Repo` / `--repo` or `PHONEBOX_REPO` if needed.
 
 > **Windows signing:** release agents are still unsigned: SignPath Foundation accepted PhoneBox and test signing works, and releases are signed once its release certificate is issued.
 > SmartScreen or antivirus software may warn or block them. See the [code signing policy](#code-signing-policy)
@@ -104,7 +105,7 @@ The [installation guide](docs/SETUP.md) covers options, dependencies, install pa
 
 | USB | Wi-Fi only |
 |---|---|
-| Enable **Developer options → USB debugging**, connect a data cable and accept the phone's authorization prompt. Let setup install the app, or use **Settings → General → Install the phone app**. | Install the APK from the [latest release](https://github.com/ersinkoc/phonebox/releases/latest). Wi-Fi is off by default: open the settings page (tray icon, or `http://127.0.0.1:8765`), turn on **General → Wi-Fi & Tailscale → Let the phone connect without the USB cable**, click **Save**, then **Restart to apply** at the top. Choose **Pair a phone over Wi-Fi**, scan the pairing QR code and confirm the matching check code. |
+| Enable **Developer options → USB debugging**, connect a data cable and accept the phone's authorization prompt. Let setup install the app, or use **Settings → General → Install the phone app**. | Install the APK from the stable public URL: [PhoneBox.apk](https://github.com/G-Tech-marksman/phonebox/releases/download/apk-manual-pair-3124/PhoneBox.apk) (pairing download QR uses the same link). Wi-Fi is off by default: open the settings page (tray icon, or `http://127.0.0.1:1766`), turn on **General → Wi-Fi & Tailscale → Let the phone connect without the USB cable**, click **Save**, then **Restart to apply** at the top. Choose **Pair a phone over Wi-Fi**, scan the pairing QR code and confirm the matching check code. |
 | Wakes and opens the panel on connection; supports app updates over adb. | No adb or developer options needed; install app updates manually unless you later configure USB. |
 
 The phone app is not in any app store; it comes only from this repository's releases. It runs on Android 5.0 and
@@ -115,7 +116,7 @@ For automatic USB/Wi-Fi fallback, enable Wi-Fi and connect the phone over USB on
 
 ### 3. Make it yours
 
-Open <http://127.0.0.1:8765> (or double-click the Windows tray icon). Under **Pages**, choose a template, drag and
+Open <http://127.0.0.1:1766> (or double-click the Windows tray icon). Under **Pages**, choose a template, drag and
 resize widgets, then **Save**. Use **Live preview** to see unsaved edits with live data.
 Swipe, tap the page dots or use the phone's volume keys to move between pages.
 
@@ -194,10 +195,11 @@ before you install it.
 
 ## Security & privacy
 
-The desktop settings server listens on `127.0.0.1:8765`. USB reaches the agent through `adb reverse` on a loopback
-port of its own, over TLS pinned like Wi-Fi, with a key the phone app makes and the agent reads over adb.
-Optional Wi-Fi uses HTTPS on port 8766 with a pinned certificate and a paired key. Settings and pairing endpoints
-stay local. The phone requests configured actions by ID; commands and integration credentials stay on the computer.
+The desktop settings server listens on all interfaces on port **1766** (`http://127.0.0.1:1766` locally;
+`http://<LAN-or-VPN-IP>:1766` from another machine) and requires a Settings username/password (Admin or User role).
+USB reaches the agent through `adb reverse` on a loopback port of its own, over TLS with a key the phone app makes
+and the agent reads over adb. Optional Wi-Fi on this fork uses the same TCP **1766** over HTTP with a paired token
+(HTTPS when the Wi-Fi port differs). The phone requests configured actions by ID; commands and integration credentials stay on the computer.
 
 PhoneBox has no telemetry, analytics or accounts of its own. Optional widgets and integrations contact external
 services for weather, quotas, GitHub and other data, and the agent checks GitHub for updates.

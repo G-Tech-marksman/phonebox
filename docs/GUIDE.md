@@ -418,7 +418,7 @@ Notifications take `title`, `text`, `level`, `vibrate`, `seconds`, `wake` (light
 `GET /api/push` lists the values and `DELETE /api/push/<key>` removes one; values survive restarts.
 
 From this PC no key is needed. With Wi-Fi on, other machines on the network or Tailscale can use the same endpoints
-on `https://<pc>:8766` with the **webhook key** from the settings (`Authorization: Bearer <key>`, or `?token=<key>`
+on `https://<pc>:1766` with the **webhook key** from the settings (`Authorization: Bearer <key>`, or `?token=<key>`
 for senders that cannot set headers). That key opens only the webhook endpoints, never the phone API.
 
 To show whether a GitHub Copilot CLI session is working or waiting for you (also from WSL2), see the

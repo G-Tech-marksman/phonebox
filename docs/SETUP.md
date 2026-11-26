@@ -8,19 +8,25 @@
 
 ### 1. Install PhoneBox on the computer
 
-**Windows 10/11**: open PowerShell (a normal window, not *Run as administrator*) and paste:
+**Windows 10/11**: open PowerShell (a normal window, not *Run as administrator*) and paste this fork’s installer (downloads agent builds from **G-Tech-marksman/phonebox**, not upstream):
 
 ```powershell
-irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1 | iex
+irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1 | iex
+```
+
+After this branch is merged to `main`:
+
+```powershell
+irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1 | iex
 ```
 
 **Linux and macOS**: open a terminal and paste (run it as yourself, not with `sudo`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 ```
 
-Setup installs the [latest release](https://github.com/ersinkoc/phonebox/releases/latest) and anything missing:
+Setup installs the [latest release with an agent zip](https://github.com/G-Tech-marksman/phonebox/releases) from this fork and anything missing:
 
 1. **Checks the computer**: Windows x64; Linux x64 / ARM64 with glibc; macOS on Apple silicon or Intel.
 2. **Downloads and checks the agent**: the download must match the release's SHA-256 checksums. With the
@@ -41,7 +47,7 @@ Setup installs the [latest release](https://github.com/ersinkoc/phonebox/release
    It adds a Start Menu shortcut on Windows, and asks whether to start PhoneBox at login: a Startup-folder shortcut
    on Windows, a systemd user service on Linux, a launchd agent on macOS.
 6. **Puts the app on the phone over USB**, if you want. It shows how to turn on USB debugging and waits for the phone.
-7. **Starts the agent** and opens its settings at <http://127.0.0.1:8765>.
+7. **Starts the agent** and opens its settings at <http://127.0.0.1:1766>.
 
 The agent installs for your user. System package managers may request administrator rights for missing dependencies;
 on Linux, setup asks before using `sudo`. Run it again
@@ -62,18 +68,33 @@ and changes nothing.
 | `-NoAutostart` | `--no-autostart` | Do not start PhoneBox at login |
 | `-NoStart` | `--no-start` | Install only |
 | — | `--no-extras` | Do not offer the optional helpers |
+| `-Repo owner/name` | `--repo owner/name` | GitHub repo for releases (default `G-Tech-marksman/phonebox`; or `$env:PHONEBOX_REPO` / `$PHONEBOX_REPO`) |
 | `-Version 0.9.8` | `--version 0.9.8` | Install that release instead of the latest |
 | `-DryRun` | `--dry-run` | Download and check, change nothing |
 
 To pass options:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1))) -NoPhone
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -NoPhone
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.9
 ```
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash -s -- --no-phone
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash -s -- --no-phone
+curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash -s -- --repo G-Tech-marksman/phonebox
 ```
+
+<details><summary><b>Repair after a bad install (Windows)</b></summary>
+
+If setup finished but the agent never answered (`agent.log` under `%LOCALAPPDATA%\PhoneBox`), re-run setup so it replaces the app with the latest fork release (needs **v0.9.29-gtech.9** or newer — that zip is the real Windows WinForms/`WinExe` build; it **forces** listen port **1766** on all interfaces even if config still says 8766):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Yes -Version 0.9.29-gtech.9
+```
+
+Then open http://127.0.0.1:1766. If it still fails, open `%LOCALAPPDATA%\PhoneBox\agent.log` and paste the **last ~40 lines** (especially any `Exception` / `fail` / `error` lines). Also confirm Explorer shows `PhoneBoxAgent.exe` still under `%LOCALAPPDATA%\PhoneBox\app` (antivirus sometimes deletes it).
+
+</details>
 
 </details>
 
@@ -92,10 +113,10 @@ curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | b
   policy can block the agent too; its administrator can allow it.
 - **USB debugging gives a computer you allow control over the phone.** Allow only your own computers. You can
   withdraw them on the phone under *Developer options › Revoke USB debugging authorisations*.
-- **Wi-Fi is off until you turn it on.** Until then the agent listens only on this computer (`127.0.0.1:8765`).
-  When you turn it on, Windows asks to let PhoneBox through the firewall: allow *Private* networks only. On Linux
-  with ufw or firewalld, open TCP port 8766 for your local network. Every connection PhoneBox makes is listed in
-  the [privacy policy](../PRIVACY.md).
+- **Settings listens on all interfaces on TCP 1766** (`http://127.0.0.1:1766`, `http://192.168.x.x:1766`, or your
+  advertise / VPN host). Phone Wi-Fi (when enabled) shares that same cleartext port with a paired token. Allow
+  inbound TCP **1766** on the PC firewall for Private / VPN networks when another laptop or phone should open Settings
+  or pair. Every connection PhoneBox makes is listed in the [privacy policy](../PRIVACY.md).
 - **Linux USB permissions**: if `adb devices` shows `no permissions`, adb also needs udev rules. Install
   `android-sdk-platform-tools-common` on Debian/Ubuntu or `android-udev` on Arch. Some systems also need the
   `plugdev` group (`sudo usermod -aG plugdev $USER`, then log out and in). Setup points this out when it happens.
@@ -145,7 +166,12 @@ curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | b
   *Settings › General › Wi-Fi & Tailscale*, click **Pair a phone over Wi-Fi** and scan the QR code (see
   [Wi-Fi & Tailscale](#wi-fi--tailscale)).
 
-The settings are at <http://127.0.0.1:8765>, on Windows also from the tray icon.
+The settings are at <http://127.0.0.1:1766> (same PC), or from another machine on the LAN/VPN at
+`http://<this-PC-IP>:1766` (for example `http://192.168.1.101:1766`). On Windows also from the tray icon.
+
+**Settings login (gtech.9+):** the first time you open Settings, create an **Admin** username and password.
+Later you can add **User** accounts (Pages / live preview only) under **Users**. Passwords are stored hashed on
+this PC (`settings-users.json`); they are never written to the agent log.
 
 ### Other ways to install
 
@@ -153,7 +179,7 @@ The settings are at <http://127.0.0.1:8765>, on Windows also from the tray icon.
   APK and agents for Windows x64, Linux x64/ARM64 and macOS Apple silicon/Intel, with SHA-256 checksums and build
   provenance. Unzip the agent and run it. It can update itself only from the install folder in the table above. On a Mac,
   the `.dmg` holds `PhoneBox.app`: drag it to Applications (or `~/Applications`) and open it. It has no window; the settings
-  are at http://127.0.0.1:8765. If you installed with `setup.sh`, that agent is already running and holds the port, so first quit it
+  are at http://127.0.0.1:1766. If you installed with `setup.sh`, that agent is already running and holds the port, so first quit it
   and run `launchctl unload ~/Library/LaunchAgents/net.oxog.phonebox.agent.plist` (otherwise opening the app only reopens its settings,
   and the login job starts the old agent again). It is not notarized, so macOS blocks it the first time: open it once, then allow it in *System Settings › Privacy &
   Security › Open Anyway* (right-click › Open works only up to macOS 14). The Accessibility permission is recorded per
@@ -277,30 +303,60 @@ and may differ slightly in older ones.
 
 Wi-Fi is off by default. To turn it on:
 
-1. Open the settings page on the PC: click the tray icon, or go to `http://127.0.0.1:8765` in a browser.
-2. In **General**, scroll down to **Wi-Fi & Tailscale** and turn on **Let the phone connect without the USB cable**.
-3. Click **Save**, then **Restart to apply** at the top of the page. The line next to **Pair a phone over Wi-Fi**
-   says "Listening on port 8766" once it works.
-4. Allow PhoneBox through the firewall when Windows asks.
+1. Open the **Settings** page on the PC: click the tray icon, or go to `http://127.0.0.1:1766` in a browser
+   (loopback HTTP; Wi-Fi/VPN uses HTTPS on the same TCP port on your network interfaces).
+2. Open the **Wi-Fi & Tailscale** sidebar item (under General) and turn on **Let the phone connect without the USB cable**.
+3. **Port** is fixed at **`1766`** on this fork (older installs that still had `8766` are rewritten to `1766` on agent
+   startup / setup). Pairing QR, copy link, `/pair/`, and the phone all use **1766**.
+4. Click **Save**, then **Restart to apply** at the top of the page. The line next to **Pair a phone over Wi-Fi**
+   says "Listening on port 1766" once it works.
+5. Allow PhoneBox through the firewall when Windows asks (open TCP **1766** on your local network / VPN).
 
-Then pair the phone in one of two ways:
+Then pair the phone in one of these ways:
 
-- **Without a cable:** click **Pair a phone over Wi-Fi**. The window shows a QR code that downloads the app and one
-  that pairs. Scan the second with the phone's camera, open the link and tap **Open in PhoneBox**; the phone asks you
-  to confirm a code that the window also shows. No developer options, USB debugging or adb needed. The QR code holds
-  the PC's addresses, its certificate fingerprint and a one-time code (5 minutes, single use), never the key itself.
-  A phone paired this way only uses Wi-Fi: plugging it into the PC does not wake it or open the panel, there is no
-  USB fallback when Wi-Fi drops, and app updates are installed from the release page instead of over USB.
+- **Without a cable (QR):** click **Pair a phone over Wi-Fi**. The window shows a QR code that downloads the app and one
+  that pairs. The pairing QR opens the PhoneBox app directly (`phonebox://pair?…`) — it does not use a third-party
+  GitHub Pages host. You can also **Copy agent page link** for `https://&lt;pc&gt;:&lt;wifi-port&gt;/pair/#…` served by
+  your own agent. The phone asks you to confirm a code that the window also shows. No developer options, USB debugging
+  or adb needed. The payload holds the PC's addresses, its Wi-Fi port, its certificate fingerprint and a one-time code
+  (5 minutes, single use), never the key itself. A phone paired this way only uses Wi-Fi: plugging it into the PC does
+  not wake it or open the panel, there is no USB fallback when Wi-Fi drops, and app updates are installed from the
+  release page instead of over USB.
+- **Without a cable (link / host):** on the computer use **Copy pairing link** (`phonebox://…`) or **Copy agent page
+  link**, or note the host, port, fingerprint and one-time code from the pairing window. On the phone, while offline,
+  tap **Connect with link or host**, paste the link (optionally override host/port) or enter those fields, then confirm.
+  This uses the same secure claim as the QR.
 - **Over USB:** plug the phone in once.
 
 Either way the phone gets the PC's addresses, a secret key and the fingerprint of the agent's self-signed TLS
 certificate, and trusts only that certificate. With USB, when the cable is unplugged it switches to
-`https://<pc>:8766` automatically and back to USB when it is plugged in again; the status line shows which one it
-uses.
+`https://<pc>:<port>` automatically (the Wi-Fi port from settings) and back to USB when it is plugged in again; the
+status line shows which one it uses.
 
-- The phone and the PC need to be on the same network. If they are not (separate Wi-Fi networks, another
-  building…), install [Tailscale](https://tailscale.com) on both: the agent offers its Tailscale address too.
-- Windows Firewall asks once when Wi-Fi is turned on; allow it for the network types you use.
+- **Same LAN:** the phone and the PC need to be on the same network. The agent offers its private addresses
+  automatically.
+- **Tailscale (recommended off-LAN):** install [Tailscale](https://tailscale.com) on the phone and the PC. The agent
+  offers its Tailscale (`100.x`) address; you can also put the MagicDNS name under **Remote hosts to advertise**.
+- **Public IP / DDNS / port forward:** under **Remote hosts to advertise**, enter your public IP or DDNS hostname
+  (one per line). Forward the chosen TCP **Port** on your router to this PC. Pair as usual (QR, Copy pairing link, or
+  **Connect with link or host** on the phone). The phone still uses TLS certificate pinning and the one-time claim
+  code — do not open the port without pairing. Allow the port in the PC firewall too.
+- **VPN hostname (example: `vpn2-g-tech.tech:1766`):** use this when the phone reaches the PC only through your VPN
+  (not the home LAN). Exact Settings steps:
+
+  1. Settings › **Wi-Fi & Tailscale** → enable **Let the phone connect without the USB cable**.
+  2. Confirm **Port** shows **1766** (fixed; migrated automatically if you still had 8766).
+  3. Under **Remote hosts to advertise**, enter exactly: `vpn2-g-tech.tech` (one line).
+  4. **Save**, then **Restart to apply**. Confirm the status shows listening on port **1766**.
+  5. On the PC firewall, allow inbound TCP **1766** for PhoneBoxAgent (and ensure your VPN path delivers that port to this PC — PhoneBox cannot create the VPN tunnel for you).
+  6. **Pair a phone over Wi-Fi**: the QR / Copy pairing link / agent `/pair/` page list `vpn2-g-tech.tech` first and use port `1766`. Or on the phone use **Connect with link or host** with host `vpn2-g-tech.tech`, port `1766`, plus the fingerprint and one-time code from the pairing window.
+
+  Note: tray / setup open **Settings** at `http://127.0.0.1:1766`. From another laptop use
+  `http://192.168.1.101:1766` (replace with this PC's LAN IP) or `http://vpn2-g-tech.tech:1766` when that name
+  resolves on your VPN. Phone pairing uses the same TCP **1766** over HTTP + token on this fork.
+
+  Reachability of `vpn2-g-tech.tech:1766` depends on your VPN DNS and routing. From this environment that name did not resolve (NXDOMAIN), so live end-to-end connectivity was not verified here.
+- Windows Firewall asks once when Wi-Fi is turned on; allow it for the network types you use (and Tailscale / VPN).
 - The screen stays on, so the phone still needs a charger — just not necessarily the PC.
 
 With several computers (each paired once over USB), the page overview on the phone lists them and switches between

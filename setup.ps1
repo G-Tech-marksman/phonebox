@@ -3,16 +3,25 @@
   PhoneBox setup for Windows: installs the latest release, everything it needs, and the phone app.
 
 .DESCRIPTION
-  Run it from a normal PowerShell window (not "Run as administrator"):
+  Run it from a normal PowerShell window (not "Run as administrator").
 
-    irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1 | iex
+  This fork (G-Tech-marksman/phonebox) — preferred:
 
-  With options:
+    irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1 | iex
 
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.ps1))) -NoPhone
+  PR branch (until merged):
+
+    irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1 | iex
+
+  With options (must use scriptblock form; plain iex cannot pass parameters):
+
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -NoPhone
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.9
+
+  Or set $env:PHONEBOX_REPO = 'G-Tech-marksman/phonebox' before running.
 
   What it does, asking first before anything outside the PhoneBox folders:
-    1. Checks this PC (Windows 10/11, x64) and finds the latest PhoneBox release.
+    1. Checks this PC (Windows 10/11, x64) and finds the latest PhoneBox release on the chosen repo.
     2. Downloads the agent and checks its SHA-256 checksum (and its build provenance when the GitHub CLI is signed in).
     3. Installs adb (Android platform tools) when it is missing: with winget, or from Google's download.
     4. Installs the agent to %LOCALAPPDATA%\PhoneBox\app. Settings in %APPDATA%\PhoneBox are kept.
@@ -20,6 +29,8 @@
 
   Running it again updates PhoneBox or repairs the installation.
 
+.PARAMETER Repo
+  GitHub owner/name to download releases from (default G-Tech-marksman/phonebox on this fork; override with -Repo or $env:PHONEBOX_REPO).
 .PARAMETER Yes
   Answer every question with its default: for unattended runs.
 .PARAMETER NoPhone
@@ -38,6 +49,7 @@
   Run even as administrator: only for PCs where every window runs elevated (UAC turned off) and for CI.
 #>
 param(
+    [string]$Repo = $(if ($env:PHONEBOX_REPO) { $env:PHONEBOX_REPO } else { 'G-Tech-marksman/phonebox' }),
     [switch]$Yes,
     [switch]$NoPhone,
     [string]$Serial,
@@ -48,9 +60,13 @@ param(
     [switch]$AllowAdministrator
 )
 
-$Repo = 'ersinkoc/phonebox'
+if ($Repo -match '^https?://github\.com/([^/]+)/([^/#?]+)') { $Repo = "$($Matches[1])/$($Matches[2])".TrimEnd('/') }
+$Repo = $Repo.Trim().Trim('/')
+if ($Repo -notmatch '^[^/\s]+/[^/\s]+$') { throw "Invalid -Repo '$Repo' (expected owner/name, for example G-Tech-marksman/phonebox)." }
 $Package = 'net.oxog.phonebox.deskpanel'
-$SettingsUrl = 'http://127.0.0.1:8765'
+# Settings HTTP + phone Wi-Fi share TCP 1766 on all interfaces (loopback + LAN/VPN).
+$SettingsUrl = 'http://127.0.0.1:1766'
+$LanPort = 1766
 
 function Write-Step([string]$Text) { Write-Host ''; Write-Host "==> $Text" -ForegroundColor Cyan }
 function Write-Info([string]$Text) { Write-Host "    $Text" }
@@ -92,10 +108,27 @@ function Get-Download([string]$Url, [string]$Path) {
     Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -Headers @{ 'User-Agent' = 'phonebox-setup' }
 }
 
+function Test-AgentReleaseAsset($Release) {
+    foreach ($a in @($Release.assets)) {
+        if ([string]$a.name -match '^PhoneBoxAgent-.+-win-x64\.zip$') { return $true }
+    }
+    return $false
+}
+
 function Get-LatestVersion {
+    $headers = @{ 'User-Agent' = 'phonebox-setup'; 'Accept' = 'application/vnd.github+json' }
+    # Prefer the newest non-draft release that actually has a Windows agent zip (includes prereleases on this fork).
+    try {
+        $list = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$Repo/releases?per_page=20" `
+            -Headers $headers -TimeoutSec 30
+        foreach ($release in @($list)) {
+            if ($release.draft) { continue }
+            if (Test-AgentReleaseAsset $release) { return [string]$release.tag_name }
+        }
+    } catch { }
     try {
         $release = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$Repo/releases/latest" `
-            -Headers @{ 'User-Agent' = 'phonebox-setup'; 'Accept' = 'application/vnd.github+json' } -TimeoutSec 30
+            -Headers $headers -TimeoutSec 30
         if ($release.tag_name) { return [string]$release.tag_name }
     } catch { }
     # The API allows 60 requests an hour per address; the release page redirects to the newest tag as well.
@@ -106,7 +139,7 @@ function Get-LatestVersion {
     $response = $request.GetResponse()
     try { $location = [string]$response.Headers['Location'] } finally { $response.Close() }
     if ($location -match '/tag/([^/?#]+)$') { return $Matches[1] }
-    throw 'Could not find the latest release on GitHub. Check the internet connection, or pass -Version (for example -Version 0.9.8).'
+    throw "Could not find a PhoneBox agent release on https://github.com/$Repo/releases. Check the internet connection, or pass -Version (for example -Version 0.9.29)."
 }
 
 function Assert-Checksum([string]$File, [string]$SumsFile) {
@@ -136,8 +169,12 @@ function Test-Provenance([string]$File) {
         return
     }
     $result = Invoke-Native $gh.Source @('attestation', 'verify', $File, '--repo', $Repo)
+    $joined = ($result.Output -join ' ')
     if ($result.Code -eq 0) { Write-Ok "$(Split-Path $File -Leaf) was built by this repository's release workflow (GitHub attestation)" }
-    elseif (($result.Output -join ' ') -match 'unknown command') { Write-Info 'Build provenance not checked: this GitHub CLI is too old for "gh attestation".' }
+    elseif ($joined -match 'unknown command') { Write-Info 'Build provenance not checked: this GitHub CLI is too old for "gh attestation".' }
+    elseif ($joined -match 'no attestations? found|attestation.*(not found|none)|failed to find') {
+        Write-Caution 'Build provenance not checked: no GitHub attestation for this release asset (common for fork builds). SHA-256 still verified.'
+    }
     else { throw "The build provenance of $(Split-Path $File -Leaf) could not be verified; nothing was installed.`n$($result.Output -join "`n")" }
 }
 
@@ -264,6 +301,27 @@ function Select-Phone([string]$Adb, [string[]]$Ignored) {
     }
 }
 
+function Force-LanPort {
+    # Rewrite %APPDATA%\PhoneBox\config.json lan.port to 1766 before start so an older 8766 install binds the VPN port.
+    $config = Join-Path $env:APPDATA 'PhoneBox\config.json'
+    if (-not (Test-Path -LiteralPath $config)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $config -Raw -Encoding UTF8
+        $obj = $raw | ConvertFrom-Json
+        if (-not $obj.lan) { $obj | Add-Member -NotePropertyName lan -NotePropertyValue ([pscustomobject]@{}) -Force }
+        $prev = $null
+        try { $prev = [int]$obj.lan.port } catch { }
+        if ($prev -eq $LanPort) { return }
+        $obj.lan | Add-Member -NotePropertyName port -NotePropertyValue $LanPort -Force
+        $json = $obj | ConvertTo-Json -Depth 100
+        Set-Content -LiteralPath $config -Value $json -Encoding UTF8
+        if ($null -eq $prev) { Write-Ok "Set Wi-Fi listen port to $LanPort in config.json" }
+        else { Write-Ok "Migrated lan.port $prev → $LanPort in config.json (Settings + Wi-Fi use $SettingsUrl / TCP $LanPort)" }
+    } catch {
+        Write-Caution "Could not rewrite lan.port in config.json: $($_.Exception.Message). The agent still forces $LanPort on startup."
+    }
+}
+
 function Get-UsbInstallPolicy([string]$Agent, [string]$OutputPath) {
     try {
         $probe = Invoke-Native $Agent @('--print-install-dir', '--write-ignored-usb', $OutputPath)
@@ -352,11 +410,12 @@ function Install-PhoneBox {
         Write-Caution "PhoneBoxAgent.exe until the agent is code-signed (pending: https://github.com/$Repo/issues/56)."
     }
 
-    Write-Step 'Finding the release'
+    Write-Step "Finding the release on $Repo"
     $tag = if ($Version) { $Version } else { Get-LatestVersion }
     $ver = $tag.Trim().TrimStart('v')
-    if ($ver -notmatch '^\d+\.\d+\.\d+$') { throw "Unexpected version '$tag'." }
+    if ($ver -notmatch '^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$') { throw "Unexpected version '$tag'." }
     $base = "https://github.com/$Repo/releases/download/v$ver"
+    Write-Info "Downloading from https://github.com/$Repo/releases/tag/v$ver"
     if ($installed -eq $ver) { Write-Ok "PhoneBox $ver (already installed; it will be reinstalled, settings stay)" }
     elseif ($installed) { Write-Ok "PhoneBox $ver (updating from $installed; settings stay)" }
     else { Write-Ok "PhoneBox $ver" }
@@ -397,9 +456,9 @@ function Install-PhoneBox {
             }
         }
 
-        $owner = Get-PortOwner 8765
+        $owner = Get-PortOwner $LanPort
         if ($owner -and $owner -ne 'PhoneBoxAgent' -and $owner -ne 'DeskAgent') {
-            Write-Caution "Port 8765 is used by $owner. PhoneBox needs this port; close $owner or PhoneBox will not start."
+            Write-Caution "Port $LanPort is used by $owner. PhoneBox needs this port for Settings and Wi-Fi; close $owner or PhoneBox will not start."
         }
 
         if ($DryRun) {
@@ -499,9 +558,12 @@ function Install-PhoneBox {
             }
         }
 
+        Force-LanPort
+
         if ($NoStart) {
             Write-Step 'Done (not started)'
             Write-Info "Start it with $exe"
+            Write-Info "Settings UI: $SettingsUrl · Wi-Fi / pairing listen port: $LanPort"
         } else {
             Write-Step 'Starting PhoneBox'
             $blocked = $false
@@ -526,19 +588,27 @@ function Install-PhoneBox {
                 }
             }
             $up = $false
-            for ($i = 0; $i -lt 30 -and -not $up -and -not $blocked; $i++) {
+            # Single-file cold start + optional Wi-Fi bind retry (--no-wifi-listen) can exceed ~20s on Windows.
+            for ($i = 0; $i -lt 60 -and -not $up -and -not $blocked; $i++) {
                 Start-Sleep -Milliseconds 700
                 try { Invoke-RestMethod -UseBasicParsing "$SettingsUrl/api/info" -TimeoutSec 2 | Out-Null; $up = $true } catch { }
             }
             if ($up) {
-                Write-Ok "PhoneBox is running: settings at $SettingsUrl (also from the tray icon)"
+                Write-Ok "PhoneBox is running: Settings at $SettingsUrl (tray icon). Wi-Fi / pairing listens on TCP $LanPort."
                 try { Start-Process $SettingsUrl } catch { }
             } elseif ($blocked) {
                 # explained above
             } elseif (-not (Test-Path $exe)) {
                 Write-Caution "PhoneBoxAgent.exe was removed, probably by an antivirus. See https://github.com/$Repo/issues/69."
             } else {
-                Write-Caution "The agent did not answer. Its log: $env:LOCALAPPDATA\PhoneBox\agent.log"
+                Write-Caution "The agent did not answer at $SettingsUrl/api/info. Log: $env:LOCALAPPDATA\PhoneBox\agent.log"
+                $log = Join-Path $env:LOCALAPPDATA 'PhoneBox\agent.log'
+                if (Test-Path -LiteralPath $log) {
+                    Write-Caution 'Last lines of agent.log:'
+                    Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+                } else {
+                    Write-Caution 'agent.log is missing (process may have exited before logging). If port 1766 is reserved by Hyper-V, run: netsh interface ipv4 show excludedportrange protocol=tcp'
+                }
                 if ($smartAppControl -eq 1) {
                     Write-Caution 'Smart App Control may have blocked it: see Windows Security > App & browser control, and the warning above.'
                 }

@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # PhoneBox setup for Linux and macOS: installs the latest release, everything it needs, and the phone app.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | bash -s -- --no-phone
+# This fork (G-Tech-marksman/phonebox) — preferred:
+#   curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.sh | bash
+# PR branch (until merged):
+#   curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
+# With options:
+#   curl -fsSL .../setup.sh | bash -s -- --no-phone
+#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.9
+# Or: export PHONEBOX_REPO=G-Tech-marksman/phonebox
 #
 # Run it as yourself, not with sudo: it asks for sudo only to install packages, and asks first.
 # Running it again updates PhoneBox or repairs the installation; settings are kept.
 #
 # Options:
+#   --repo owner/name   GitHub repo for releases (default G-Tech-marksman/phonebox; or $PHONEBOX_REPO)
 #   --yes               answer every question with its default (unattended)
 #   --no-phone          do not install the app on a phone over USB (for a Wi-Fi-only phone)
 #   --serial <id>       the phone to use when several are connected (see "adb devices")
@@ -18,9 +25,10 @@
 #   --dry-run           download and check everything, show what would happen, change nothing
 set -euo pipefail
 
-repo="ersinkoc/phonebox"
+repo="${PHONEBOX_REPO:-G-Tech-marksman/phonebox}"
 package="net.oxog.phonebox.deskpanel"
-settings_url="http://127.0.0.1:8765"
+settings_url="http://127.0.0.1:1766"
+lan_port=1766
 
 yes=0; phone=1; serial=""; autostart=1; start=1; extras=1; version=""; dry=0
 tmp=""
@@ -135,15 +143,36 @@ check_provenance() {
     ok "$(basename "$1") was built by this repository's release workflow (GitHub attestation)"
   elif printf '%s' "$out" | grep -qi 'unknown command'; then
     info 'Build provenance not checked: this GitHub CLI is too old for "gh attestation".'
+  elif printf '%s' "$out" | grep -Eqi 'no attestations? found|attestation.*(not found|none)|failed to find'; then
+    caution "Build provenance not checked: no GitHub attestation for this release asset (common for fork builds). SHA-256 still verified."
   else
     die "the build provenance of $(basename "$1") could not be verified; nothing was installed. $out"
   fi
 }
 
 latest_version() {
-  local v=""
-  v="$(download_text "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null \
-    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)" || v=""
+  local v="" json name
+  # Prefer the newest non-draft release that has a PhoneBoxAgent zip (includes prereleases on this fork).
+  json="$(download_text "https://api.github.com/repos/$repo/releases?per_page=20" 2>/dev/null)" || json=""
+  if [ -n "$json" ]; then
+    v="$(printf '%s' "$json" | python3 -c '
+import json,sys
+try:
+  releases=json.load(sys.stdin)
+except Exception:
+  sys.exit(0)
+for r in releases:
+  if r.get("draft"): continue
+  for a in r.get("assets") or []:
+    n=a.get("name") or ""
+    if n.startswith("PhoneBoxAgent-") and n.endswith(".zip"):
+      print(r.get("tag_name") or ""); sys.exit(0)
+' 2>/dev/null)" || v=""
+  fi
+  if [ -z "$v" ]; then
+    v="$(download_text "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null \
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)" || v=""
+  fi
   # the API allows 60 requests an hour per address; the release page redirects to the newest tag as well
   if [ -z "$v" ] && have curl; then
     v="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest" 2>/dev/null | sed -n 's#.*/tag/##p')" || v=""
@@ -482,13 +511,22 @@ main() {
       --no-autostart) autostart=0 ;;
       --no-start) start=0 ;;
       --no-extras) extras=0 ;;
+      --repo) [[ $# -ge 2 && -n $2 && $2 != -* ]] || die "--repo needs a value (owner/name)"; repo="$2"; shift ;;
       --version) [[ $# -ge 2 && -n $2 && $2 != -* ]] || die "--version needs a value"; version="$2"; shift ;;
       --dry-run) dry=1 ;;
-      -h|--help) sed -n '2,19p' "$0" 2>/dev/null || echo "See https://github.com/$repo#quick-start"; exit 0 ;;
+      -h|--help) sed -n '2,26p' "$0" 2>/dev/null || echo "See https://github.com/$repo#quick-start"; exit 0 ;;
       *) die "unknown option: $1 (see --help)" ;;
     esac
     shift
   done
+
+  case "$repo" in
+    https://github.com/*|http://github.com/*)
+      repo="${repo#*github.com/}"; repo="${repo%%[?#]*}"; repo="${repo%/}"
+      ;;
+  esac
+  repo="${repo#/}"; repo="${repo%/}"
+  printf '%s' "$repo" | grep -Eq '^[^/[:space:]]+/[^/[:space:]]+$' || die "invalid --repo '$repo' (expected owner/name, for example G-Tech-marksman/phonebox)."
 
   printf '\n%sPhoneBox setup%s\n' "$c_step" "$c_off"
   if [ "$dry" = 1 ]; then printf '%sDry run: downloads and checks everything, changes nothing.%s\n' "$c_warn" "$c_off"; fi
@@ -519,13 +557,14 @@ main() {
   detect_pm
   ok "$( [ "$os" = osx ] && echo "macOS $(sw_vers -productVersion 2>/dev/null)" || echo "Linux $(uname -r)"), $arch${pm:+, package manager: $pm}"
 
-  step 'Finding the release'
+  step "Finding the release on $repo"
   local tag ver base
   tag="${version:-$(latest_version)}"
-  [ -n "$tag" ] || die "could not find the latest release on GitHub. Check the internet connection, or pass --version 0.9.8."
+  [ -n "$tag" ] || die "could not find a PhoneBox agent release on https://github.com/$repo/releases. Check the internet connection, or pass --version 0.9.29-gtech.1."
   ver="${tag#v}"
-  printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "unexpected version '$tag'."
+  printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || die "unexpected version '$tag'."
   base="https://github.com/$repo/releases/download/v$ver"
+  info "Downloading from https://github.com/$repo/releases/tag/v$ver"
   ok "PhoneBox $ver ($rid)"
 
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/phonebox-setup.XXXXXX")"
@@ -644,9 +683,30 @@ main() {
     fi
   fi
 
+  # Migrate older lan.port (e.g. 8766) to the fixed Wi-Fi listen port before start.
+  if [ "$os" = osx ]; then _cfg="$HOME/Library/Application Support/PhoneBox/config.json"
+  else _cfg="${XDG_CONFIG_HOME:-$HOME/.config}/PhoneBox/config.json"; fi
+  if [ -f "$_cfg" ] && have python3; then
+    if python3 - "$_cfg" "$lan_port" <<'PY'
+import json, sys
+path, port = sys.argv[1], int(sys.argv[2])
+with open(path, encoding="utf-8") as f: data = json.load(f)
+lan = data.setdefault("lan", {})
+prev = lan.get("port")
+if prev == port: raise SystemExit(1)
+lan["port"] = port
+with open(path, "w", encoding="utf-8") as f: json.dump(data, f, indent=2)
+raise SystemExit(0)
+PY
+    then
+      ok "Migrated Wi-Fi listen port → $lan_port in config.json (Settings UI stays at $settings_url)"
+    fi
+  fi
+
   if [ "$start" = 0 ]; then
     step 'Done (not started)'
     info "Start it with $app/PhoneBoxAgent"
+    info "Settings UI: $settings_url · Wi-Fi / pairing listen port: $lan_port"
   else
     step 'Starting PhoneBox'
     start_agent
@@ -657,7 +717,7 @@ main() {
       i=$((i + 1))
     done
     if [ "$up" = 1 ]; then
-      ok "PhoneBox is running: settings at $settings_url"
+      ok "PhoneBox is running: Settings at $settings_url · Wi-Fi / pairing on TCP $lan_port"
       if [ "$os" = osx ]; then open "$settings_url" >/dev/null 2>&1 || true
       elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && have xdg-open; then (xdg-open "$settings_url" >/dev/null 2>&1 &) || true; fi
     else
@@ -670,7 +730,7 @@ main() {
   elif [ "$phone" = 1 ]; then info 'Phone app later: plug the phone in and use Settings > General > Install the phone app, or run setup again.'; fi
   info 'Wi-Fi only: install the app from the release page on the phone, then on the computer open'
   info 'Settings > General > Wi-Fi & Tailscale > Pair a phone over Wi-Fi and scan the QR code.'
-  if [ "$os" = linux ]; then info 'With a firewall (ufw, firewalld), Wi-Fi also needs TCP port 8766 open on your local network.'; fi
+  if [ "$os" = linux ]; then info 'With a firewall (ufw, firewalld), Wi-Fi also needs TCP port 1766 open on your local network.'; fi
   info "Until Wi-Fi is on, PhoneBox only listens on this computer. Every connection it makes: https://github.com/$repo/blob/main/PRIVACY.md"
   info 'Updates: PhoneBox updates itself from Settings. Run setup again any time to repair it.'
   info "Uninstall: curl -fsSL https://raw.githubusercontent.com/$repo/main/scripts/uninstall.sh | bash -s -- [--purge] [--apk]"

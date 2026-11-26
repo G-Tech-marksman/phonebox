@@ -42,11 +42,27 @@ var configDir = Path.GetDirectoryName(configPath) ?? AppPaths.ConfigDir;
 AppPaths.RestrictConfig(configPath);
 var configStore = new ConfigStore(configPath);
 configStore.PersistGenerated(); // keep the Wi-Fi token stable across restarts
+var settingsAuth = new SettingsAuth(configDir);
 var lanCfg = configStore.Get().Lan;
-var lanCert = lanCfg.Enabled && lanCfg.Port != Port ? Lan.Certificate(configDir) : null;
+// Settings HTTP binds 0.0.0.0:Port so loopback + LAN/VPN IPs work. When lan.port equals that port (fork default),
+// phone Wi-Fi uses the same cleartext listener (token); HTTPS on a second IPv4 bind would conflict.
+// --no-wifi-listen: legacy flag — skips a separate HTTPS listen when lan.port differs from Settings.
+var skipWifiListen = args.Contains("--no-wifi-listen");
+var lanCert = lanCfg.Enabled ? Lan.Certificate(configDir) : null;
 // USB uses the same certificate as Wi-Fi; the agent hands its fingerprint to the app over adb (see UsbLink.cs)
 var usbCert = lanCert ?? Lan.Certificate(configDir);
 var usb = new UsbLink(UsbLink.FreeLoopbackPort(), Lan.Fingerprint(usbCert));
+if (!Lan.TryProbeBind(IPAddress.Loopback, Port))
+{
+    try
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.LogPath)!);
+        File.AppendAllText(AppPaths.LogPath,
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} cannot bind Settings HTTP on 127.0.0.1:{Port} " +
+            $"(in use or reserved — on Windows check: netsh interface ipv4 show excludedportrange protocol=tcp).{Environment.NewLine}");
+    }
+    catch { }
+}
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -58,11 +74,15 @@ builder.WebHost.ConfigureKestrel(k =>
     // a dictation travels in the query (the phone's transport sends no request bodies): 1000 characters of any script,
     // percent-encoded, fit in 16 KB
     k.Limits.MaxRequestLineSize = 16 * 1024;
-    k.Listen(IPAddress.Loopback, Port);
+    // Settings (+ phone cleartext when Wi-Fi shares this port): HTTP on all interfaces so
+    // http://127.0.0.1:1766, http://192.168.x.x:1766, and http://vpn-host:1766 all work.
+    // HTTPS cannot also bind IPv4 :1766 while 0.0.0.0:1766 is taken — phone uses HTTP+token on this fork when ports match.
+    k.Listen(IPAddress.Any, Port);
     // USB: the end of the phone's adb reverse tunnel, on a port of its own, over TLS the app pins, with the app's key
     k.Listen(IPAddress.Loopback, usb.Port, l => l.UseHttps(usbCert));
-    // Wi-Fi / Tailscale: HTTPS with a pinned self-signed certificate, token required (see Lan.cs).
-    if (lanCert is not null) k.Listen(IPAddress.Any, lanCfg.Port, l => l.UseHttps(lanCert));
+    // Wi-Fi HTTPS only when it uses a different TCP port than Settings (not the fixed-1766 fork default).
+    if (lanCert is not null && !skipWifiListen && lanCfg.Port != Port)
+        k.Listen(IPAddress.Any, lanCfg.Port, l => l.UseHttps(lanCert));
 });
 builder.Logging.ClearProviders();
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
@@ -71,6 +91,7 @@ builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat =
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
 
 builder.Services.AddSingleton(configStore);
+builder.Services.AddSingleton(settingsAuth);
 builder.Services.AddSingleton(endpoint);
 builder.Services.AddSingleton(usb);
 builder.Services.AddSingleton<AudioControl>();
@@ -241,12 +262,10 @@ app.Use(async (ctx, next) =>
 app.MapGet("/api/latency", () => Results.Json(timings.Summary()));
 
 // Security:
-//  - Local port 8765 listens on 127.0.0.1 only; the Host check blocks DNS rebinding. From browsers only the settings
-//    page itself (same origin) is accepted (no CSRF).
-//  - The phone's USB tunnel ends on a port of its own (UsbLink): every app on the phone can reach the tunnel, so it
-//    is TLS with the certificate the app pins (handed over adb), needs the key the PhoneBox app made (read over adb),
-//    and serves only the phone API.
-//  - The optional Wi-Fi port only serves the phone API, only over TLS, and only with the paired token.
+//  - Settings HTTP listens on 0.0.0.0:1766 (loopback + LAN + VPN). Host allowlist + same-origin / Sec-Fetch block CSRF.
+//  - USB: TLS + app key on a port of its own.
+//  - Wi-Fi when lan.port == Settings port (fork default 1766): phone uses HTTP + paired token on the same listener
+//    (HTTPS cannot share IPv4 :1766 with 0.0.0.0). When lan.port differs, HTTPS on that port as upstream.
 app.UseWebSockets();
 app.UseRouting();
 app.Use(async (ctx, next) =>
@@ -274,9 +293,10 @@ app.Use(async (ctx, next) =>
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
-        if (access is Lan.LanAccess.PairingClaim or Lan.LanAccess.Webhook)
+        if (access is Lan.LanAccess.PairingClaim or Lan.LanAccess.Webhook or Lan.LanAccess.PairPage)
         {
-            // pairing claims and webhooks must not touch phone registry, app version or "phone connected" updates
+            // pairing claims, webhooks and the static /pair landing page must not touch phone registry, app version or
+            // "phone connected" updates
             if (access == Lan.LanAccess.PairingClaim)
                 ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = 1024;
             ctx.Response.Headers.CacheControl = "no-store";
@@ -284,17 +304,99 @@ app.Use(async (ctx, next) =>
             return;
         }
     }
-    else
+    else if (ctx.Connection.LocalPort == Port && !ctx.Request.IsHttps)
     {
+        var lan = configStore.Get().Lan;
+        var phoneOrPairExempt = false;
+        // Phone / webhook / pair over cleartext HTTP when Settings and Wi-Fi share port 1766 (no separate HTTPS bind).
+        if (lan.Enabled && origin == "")
+        {
+            var access = Lan.AuthorizeRequest(lan, ctx.Request.Method, ctx.Request.Path, origin,
+                ctx.Request.Headers.Authorization, ctx.Request.Query["token"]);
+            if (access is not Lan.LanAccess.Denied)
+            {
+                if (access is Lan.LanAccess.PairingClaim or Lan.LanAccess.Webhook or Lan.LanAccess.PairPage)
+                {
+                    if (access == Lan.LanAccess.PairingClaim)
+                        ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = 1024;
+                    ctx.Response.Headers.CacheControl = "no-store";
+                    await next();
+                    return;
+                }
+                // Phone panel API — skip Settings login; fall through to Host + shared post-auth handling
+                phoneOrPairExempt = true;
+            }
+            else if (Lan.IsPairPage(ctx.Request.Method, ctx.Request.Path))
+            {
+                ctx.Response.Headers.CacheControl = "no-store";
+                await next();
+                return;
+            }
+            else if (!string.IsNullOrEmpty(ctx.Request.Headers.Authorization))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+            // else: browser Settings UI (no Authorization) — Host allowlist + login below
+        }
+
         var host = ctx.Request.Host.Host;
+        var selfOrigin = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
         var spotifyCallback = ctx.Request.Method == "GET" && ctx.Request.Path == "/api/controls/spotify/callback"
             && app.Services.GetRequiredService<SpotifyControl>().HasPendingState(ctx.Request.Query["state"]);
-        if ((host != "127.0.0.1" && host != "localhost") || (origin != "" && !SameOrigins.Contains(origin))
+        if (!Lan.IsAllowedSettingsHost(host, lan)
+            || (origin != "" && origin != selfOrigin && !SameOrigins.Contains(origin))
             || (!spotifyCallback && BrowserGuard.IsForeign(ctx.Request.Headers["Sec-Fetch-Site"], ctx.Request.Headers["Sec-Fetch-Mode"], ctx.Request.Method, ctx.Request.Path)))
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
+
+        // Settings web UI login (not phone/USB/webhook). /api/info stays open for setup health checks.
+        if (!phoneOrPairExempt && !spotifyCallback && !SettingsAuth.IsAnonymousPath(ctx.Request.Path, ctx.Request.Method))
+        {
+            var auth = app.Services.GetRequiredService<SettingsAuth>();
+            if (auth.NeedsSetup && !(ctx.Request.Path == "/" || ctx.Request.Path.StartsWithSegments("/panel")))
+            {
+                // Until an admin exists, only the HTML shell + auth/setup APIs are reachable (APIs gated above / below).
+                if (!(HttpMethods.IsGet(ctx.Request.Method) && (ctx.Request.Path == "/" || ctx.Request.Path.StartsWithSegments("/panel"))))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "Setup required", needsSetup = true });
+                    return;
+                }
+            }
+            else if (!auth.NeedsSetup)
+            {
+                var sessionUser = auth.GetSessionUser(SettingsAuth.ReadSessionCookie(ctx.Request));
+                if (sessionUser is null)
+                {
+                    if (HttpMethods.IsGet(ctx.Request.Method) && (ctx.Request.Path == "/" || ctx.Request.Path.StartsWithSegments("/panel")))
+                    {
+                        // Serve the shell so the login form can load; APIs stay 401.
+                    }
+                    else
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        await ctx.Response.WriteAsJsonAsync(new { error = "Login required" });
+                        return;
+                    }
+                }
+                else if (!SettingsAuth.IsAllowedForRole(sessionUser.Role, ctx.Request.Method, ctx.Request.Path))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "Not allowed for this role" });
+                    return;
+                }
+                else
+                    ctx.Items[SettingsAuth.ItemKey] = sessionUser;
+            }
+        }
+    }
+    else
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
     }
     // any request from the app shows the phone is there, not only a state poll: an app on the live stream polls
     // nothing, and a stream that is not yet (or no longer) open must not hide the phone from a permission prompt (#497)
@@ -329,7 +431,7 @@ app.MapGet("/api/pair", (ConfigStore cfg) =>
         port = lanCfg.Port,
         token = lan.Token,
         fingerprint = Lan.Fingerprint(lanCert),
-        hosts = Lan.Addresses(),
+        hosts = Lan.AdvertisedHosts(lan),
         macs = WakeOnLan.LocalMacs(),
     });
 });
@@ -343,22 +445,40 @@ app.MapPost("/api/pair/start", (ConfigStore cfg, PairingCodes codes) =>
     if (!cfg.Get().Lan.Enabled || lanCert is null)
         return Results.Json(new { enabled = false, configured = cfg.Get().Lan.Enabled });
     var (code, expiresAt, attempt) = codes.Start(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-    var hosts = Lan.Addresses();
+    var lan = cfg.Get().Lan;
+    var hosts = Lan.AdvertisedHosts(lan);
     var fingerprint = Lan.Fingerprint(lanCert);
-    var link = PairingCodes.Link(Environment.MachineName, fingerprint, lanCfg.Port, hosts, code);
-    var apk = $"https://github.com/ersinkoc/phonebox/releases/download/v{AppPaths.Version}/PhoneBox-{AppPaths.Version}.apk";
+    var pc = Environment.MachineName;
+    // App deep link for the QR / Copy button — no third-party GitHub Pages hop.
+    var link = PairingCodes.Link(pc, fingerprint, lanCfg.Port, hosts, code);
+    // Prefer a user-advertised remote host for the https landing page when set; else the first LAN/Tailscale address.
+    var pageHost = Lan.NormalizeAdvertiseHosts(lan.AdvertiseHosts).FirstOrDefault()
+        ?? hosts.FirstOrDefault();
+    var pageLink = pageHost is not null
+        ? PairingCodes.PageLink(pageHost, lanCfg.Port, pc, fingerprint, lanCfg.Port, hosts, code)
+        : null;
+    var repo = UpdateService.NormalizeRepo(cfg.Get().Updates.Repo) ?? "G-Tech-marksman/phonebox";
+    // Fork pairing QR must hit a real public asset (semver PhoneBox-<v>.apk is not published on this fork).
+    var apk = PairingCodes.ApkDownloadUrl(repo, AppPaths.Version);
     return Results.Json(new
     {
         enabled = true,
-        pc = Environment.MachineName,
+        pc,
         hosts,
         port = lanCfg.Port,
         expiresAt,
         claims = codes.Claims,
         attempt,
         check = PairingCodes.Check(fingerprint),
+        // Local settings page only: shown in a click-to-copy box for confirming on the phone / pasting into manual pair.
+        code,
+        fingerprint,
         link,
+        pageLink,
         qr = PairingCodes.Svg(link),
+        // Extra QRs for manual pairing: scan the short one-time code or the certificate fingerprint separately.
+        codeQr = PairingCodes.Svg(code),
+        fpQr = PairingCodes.Svg(fingerprint),
         app = apk,
         appQr = PairingCodes.Svg(apk),
     });
@@ -368,22 +488,40 @@ app.MapGet("/api/pair/status", (PairingCodes codes) => Results.Json(new { claims
 app.MapPost("/api/pair/claim", (HttpRequest req, ConfigStore cfg, PairingCodes codes) =>
     ClaimPairingAsync(req, cfg, codes, lanCert, lanCfg.Port, app.Logger));
 
-app.MapGet("/api/lan", (ConfigStore cfg) => Results.Json(new
+app.MapGet("/api/lan", (ConfigStore cfg) =>
 {
-    configured = cfg.Get().Lan.Enabled,
-    active = lanCert is not null,
-    port = lanCfg.Port,
-    restartNeeded = cfg.Get().Lan.Enabled != (lanCert is not null) || (lanCert is not null && cfg.Get().Lan.Port != lanCfg.Port),
-    hosts = Lan.Addresses(),
-    fingerprint = lanCert is null ? null : Lan.Fingerprint(lanCert),
-}));
+    var lan = cfg.Get().Lan;
+    return Results.Json(new
+    {
+        configured = lan.Enabled,
+        active = lanCert is not null,
+        port = lanCfg.Port,
+        restartNeeded = lan.Enabled != (lanCert is not null) || (lanCert is not null && lan.Port != lanCfg.Port),
+        hosts = Lan.Addresses(),
+        advertiseHosts = Lan.NormalizeAdvertiseHosts(lan.AdvertiseHosts),
+        advertised = Lan.AdvertisedHosts(lan),
+        fingerprint = lanCert is null ? null : Lan.Fingerprint(lanCert),
+    });
+});
 
-app.MapGet("/api/update", (UpdateService upd, ConfigStore cfg) => Results.Json(new { status = upd.Status(), auto = cfg.Get().Updates.Auto, installed = UpdateService.CanUpdateAgent }));
+app.MapGet("/api/update", (UpdateService upd, ConfigStore cfg) =>
+{
+    var u = cfg.Get().Updates;
+    return Results.Json(new
+    {
+        status = upd.Status(),
+        auto = u.Auto,
+        installed = UpdateService.CanUpdateAgent,
+        repo = UpdateService.NormalizeRepo(u.Repo) ?? u.Repo,
+        branch = u.Branch,
+        hasToken = !string.IsNullOrEmpty(u.Token),
+    });
+});
 // Settings › General: install the phone app on a phone that does not have it yet (local only).
 app.MapPost("/api/phone/install", async (UpdateService upd) =>
     await upd.InstallAppAsync() is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 app.MapPost("/api/update/check", async (UpdateService upd) => { await upd.CheckAsync(); return Results.Json(upd.Status()); });
-app.MapPost("/api/update/apply", (UpdateService upd) => { _ = Task.Run(() => upd.ApplyAsync()); return Results.Accepted(); });
+app.MapPost("/api/update/apply", (UpdateService upd) => { _ = Task.Run(() => upd.ApplyAsync(automatic: false)); return Results.Accepted(); });
 
 app.MapPost("/api/restart", (IHostApplicationLifetime life) =>
 {
@@ -393,6 +531,17 @@ app.MapPost("/api/restart", (IHostApplicationLifetime life) =>
 });
 
 // ---------------------------------------------------------------- settings UI (browser)
+// Pairing landing page (fragment holds the one-time payload). Local settings port and Wi-Fi HTTPS both serve it.
+IResult PairLandingPage()
+{
+    using var s = AppPaths.Resource("pair.html")!;
+    using var r = new StreamReader(s);
+    return Results.Content(r.ReadToEnd(), "text/html; charset=utf-8");
+}
+app.MapGet("/pair", PairLandingPage);
+app.MapGet("/pair/", PairLandingPage);
+app.MapGet("/pair/index.html", PairLandingPage);
+
 app.MapGet("/", () =>
 {
     using var s = AppPaths.Resource("settings.html")!;
@@ -433,6 +582,7 @@ app.MapGet("/api/settings", (HttpRequest req, ConfigStore cfg, HttpResponse res)
     {
         var publicConfig = JsonSerializer.SerializeToNode(config, ConfigStore.WriteOpts)?.AsObject();
         if (publicConfig?["steam"] is JsonObject steam) steam.Remove("apiKey");
+        if (publicConfig?["updates"] is JsonObject updates) updates.Remove("token");
         json = publicConfig?.ToJsonString(ConfigStore.WriteOpts) ?? json;
     }
     res.Headers["X-Config-Version"] = cfg.Version.ToString();
@@ -445,17 +595,18 @@ app.MapPut("/api/settings", async (HttpRequest req, ConfigStore cfg, ControlDeck
     using var r = new StreamReader(req.Body);
     long? expected = long.TryParse(req.Headers["X-Config-Version"], out var v) ? v : null; // scripts may leave it out
     var body = await r.ReadToEndAsync();
-    if (LanPortCollidesWithLocal(body, Port))
-        return Results.BadRequest(new { error = $"Wi-Fi port cannot be the same as the local port ({Port})" });
+    // Same TCP port for Settings HTTP (loopback) and Wi-Fi HTTPS (non-loopback) is intentional on this fork.
     if (LanKeysShared(body))
         return Results.BadRequest(new { error = "The Wi-Fi key and the webhook key must be different: make a new key for one of them" });
     AgentConfig? proposed = null;
     try { proposed = JsonSerializer.Deserialize<AgentConfig>(body, ConfigStore.ReadOpts); }
     catch (JsonException) { }
-    // /api/settings redacts Steam's key for callers that are not the same-origin desktop page.
+    // /api/settings redacts Steam's key and the updates PAT for callers that are not the same-origin desktop page.
     // Keep the configured secret if that redacted (or older) client sends it back as missing/null.
-    if (ConfigStore.PreserveSteamApiKey(proposed, cfg.Get().Steam.ApiKey))
-        body = JsonSerializer.Serialize(proposed, ConfigStore.WriteOpts);
+    var preserved = false;
+    if (ConfigStore.PreserveSteamApiKey(proposed, cfg.Get().Steam.ApiKey)) preserved = true;
+    if (ConfigStore.PreserveUpdatesToken(proposed, cfg.Get().Updates.Token)) preserved = true;
+    if (preserved) body = JsonSerializer.Serialize(proposed, ConfigStore.WriteOpts);
     if (proposed?.Steam is { } steam)
     {
         steam.SteamId = string.IsNullOrWhiteSpace(steam.SteamId) ? null : steam.SteamId.Trim();
@@ -550,6 +701,79 @@ app.MapGet("/api/info", (AdbReverse adb, ConfigStore cfg, SystemMonitor monitor)
     usbProblem = adb.UsbProblem,
     webviewProblem = WebViewDoctor.DiagnoseRecent(PhoneRegistry.All(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
 }));
+
+// ---------------------------------------------------------------- Settings login / users (local Settings port; passwords never logged)
+app.MapGet("/api/auth/status", (HttpRequest req, SettingsAuth auth) =>
+{
+    var user = auth.GetSessionUser(SettingsAuth.ReadSessionCookie(req));
+    return Results.Json(new
+    {
+        needsSetup = auth.NeedsSetup,
+        authenticated = user is not null,
+        user,
+    });
+});
+app.MapPost("/api/auth/setup", async (HttpRequest req, HttpResponse res, SettingsAuth auth) =>
+{
+    if (!auth.NeedsSetup) return Results.Conflict(new { error = "Setup already completed" });
+    var body = await req.ReadFromJsonAsync<AuthCreds>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    if (!auth.TrySetup(body.Username, body.Password, out var user, out var error))
+        return Results.BadRequest(new { error });
+    var token = auth.CreateSession(user!);
+    SettingsAuth.SetSessionCookie(res, token, req.IsHttps);
+    return Results.Json(new { ok = true, user });
+});
+app.MapPost("/api/auth/login", async (HttpRequest req, HttpResponse res, SettingsAuth auth, ILogger<Program> log) =>
+{
+    if (auth.NeedsSetup) return Results.BadRequest(new { error = "Setup required", needsSetup = true });
+    var body = await req.ReadFromJsonAsync<AuthCreds>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    var userName = (body.Username ?? "").Trim();
+    if (!auth.TryAuthenticate(body.Username, body.Password, out var user, out var error))
+    {
+        // username only — never the password
+        log.LogWarning("Settings login failed for user {Username}", userName.Length == 0 ? "(empty)" : userName);
+        return Results.Json(new { error }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+    var token = auth.CreateSession(user!);
+    SettingsAuth.SetSessionCookie(res, token, req.IsHttps);
+    return Results.Json(new { ok = true, user });
+});
+app.MapPost("/api/auth/logout", (HttpRequest req, HttpResponse res, SettingsAuth auth) =>
+{
+    auth.RevokeSession(SettingsAuth.ReadSessionCookie(req));
+    SettingsAuth.ClearSessionCookie(res, req.IsHttps);
+    return Results.Json(new { ok = true });
+});
+app.MapGet("/api/auth/me", (HttpContext ctx) =>
+    ctx.Items[SettingsAuth.ItemKey] is SettingsAuth.UserPublic user
+        ? Results.Json(user)
+        : Results.Unauthorized());
+
+app.MapGet("/api/users", (SettingsAuth auth) => Results.Json(new { users = auth.ListUsers() }));
+app.MapPost("/api/users", async (HttpRequest req, SettingsAuth auth) =>
+{
+    var body = await req.ReadFromJsonAsync<UserWrite>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    if (!auth.TryCreate(body.Username, body.Password, body.Role, out var user, out var error))
+        return Results.BadRequest(new { error });
+    return Results.Json(new { user });
+});
+app.MapPut("/api/users/{id}", async (string id, HttpRequest req, SettingsAuth auth) =>
+{
+    var body = await req.ReadFromJsonAsync<UserWrite>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    if (!auth.TryUpdate(id, body.Username, body.Password, body.Role, out var user, out var error))
+        return Results.BadRequest(new { error });
+    return Results.Json(new { user });
+});
+app.MapDelete("/api/users/{id}", (string id, SettingsAuth auth) =>
+{
+    if (!auth.TryDelete(id, out var error))
+        return Results.BadRequest(new { error });
+    return Results.Json(new { ok = true });
+});
 
 // Phone mic status for the settings page and scripts (local port only: not a phone path, see Lan.AllowedOverLan).
 app.MapGet("/api/phone-mic", (PhoneMic mic) => Results.Json(new { mic = mic.Snapshot() }));
@@ -1216,19 +1440,38 @@ app.MapDelete("/api/settings/shortcut-icon", (string id, HttpRequest req, Config
 });
 
 app.Lifetime.ApplicationStarted.Register(() =>
-    app.Logger.LogInformation("PhoneBox agent {Version} ready on http://127.0.0.1:{Port}, phone USB port {UsbPort} (config: {Path})",
-        AppPaths.Version, Port, usb.Port, configPath));
+{
+    app.Logger.LogInformation(
+        "PhoneBox agent {Version} ready on http://0.0.0.0:{Port} (e.g. http://127.0.0.1:{Port}, LAN/VPN http://<host>:{Port}), phone USB port {UsbPort} (config: {Path})",
+        AppPaths.Version, Port, Port, Port, usb.Port, configPath);
+    if (lanCfg.Enabled && lanCfg.Port == Port)
+        app.Logger.LogInformation("Wi-Fi shares TCP {Port} over HTTP (phone uses token; open Settings from another PC as http://<advertise-host>:{Port}/)", Port, Port);
+});
 
 // macOS, running as PhoneBox.app: the main thread belongs to the menu bar icon and the host runs beside it (MenuBarHost)
-if (!MenuBarHost.TryRun(app, args, endpoint, configDir)) app.Run();
+try
+{
+    if (!MenuBarHost.TryRun(app, args, endpoint, configDir)) app.Run();
+}
+catch (Exception ex)
+{
+    try
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.LogPath)!);
+        File.AppendAllText(AppPaths.LogPath,
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} agent listen/start failed: {ex}{Environment.NewLine}");
+    }
+    catch { }
+    throw;
+}
 
 // Restart requested from the settings page (e.g. Wi-Fi turned on): hand over to a fresh instance.
 single.ReleaseMutex();
 single.Dispose();
-if (AppRestart.Requested && (AppRestart.Executable ?? Environment.ProcessPath) is { } exe)
+if (AppRestart.Requested && (AppRestart.Executable ?? Environment.ProcessPath) is { } restartExe)
 {
     if (AppRestart.ServiceManaged(Environment.GetEnvironmentVariable, Environment.ProcessId, AppRestart.ParentName)) Environment.ExitCode = AppRestart.ServiceRestartCode;
-    else System.Diagnostics.Process.Start(AppRestart.StartInfo(exe, args));
+    else System.Diagnostics.Process.Start(AppRestart.StartInfo(restartExe, args.Where(a => a != "--no-wifi-listen").ToArray()));
 }
 
 static void AddMonitor<T>(IServiceCollection s) where T : class, IHostedService
@@ -1239,6 +1482,9 @@ static void AddMonitor<T>(IServiceCollection s) where T : class, IHostedService
 
 /// <summary>Body of POST /api/pair/claim.</summary>
 internal sealed record PairClaim(string? Code);
+
+internal sealed record AuthCreds(string? Username, string? Password);
+internal sealed record UserWrite(string? Username, string? Password, string? Role);
 
 public partial class Program
 {
@@ -1257,15 +1503,13 @@ public partial class Program
                 collides = false;
                 if (prop.Value.ValueKind != JsonValueKind.Object) continue;
                 var enabled = false;
-                var port = 8766;
                 foreach (var lp in prop.Value.EnumerateObject())
                 {
                     if (lp.Name.Equals("enabled", StringComparison.OrdinalIgnoreCase) && lp.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                         enabled = lp.Value.GetBoolean();
-                    else if (lp.Name.Equals("port", StringComparison.OrdinalIgnoreCase) && lp.Value.ValueKind == JsonValueKind.Number && lp.Value.TryGetInt32(out var p))
-                        port = Math.Clamp(p, 1024, 65535);
                 }
-                collides = enabled && port == localPort;
+                // Normalize always pins lan.port to FixedPort, so collision uses that value.
+                collides = enabled && LanConfig.FixedPort == localPort;
             }
             return collides;
         }
@@ -1356,7 +1600,7 @@ public partial class Program
             port = lanPort,
             token = lan.Token,
             fingerprint = Lan.Fingerprint(lanCert),
-            hosts = Lan.Addresses(),
+            hosts = Lan.AdvertisedHosts(lan),
             macs = WakeOnLan.LocalMacs(),
         });
     }

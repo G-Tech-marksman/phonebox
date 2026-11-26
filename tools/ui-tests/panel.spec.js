@@ -631,8 +631,9 @@ test('the pairing page hands a checked link to the app and clears it from the ad
   await expect(page.locator('#hosts')).toHaveText('192.168.1.10, 100.64.0.7 (port 8766)');
   await expect(page.locator('#check')).toHaveText('ABAB ABAB');
   const href = await page.locator('#open').getAttribute('href');
+  const fallbackUrl = encodeURIComponent(new URL('/pair/?cannot-open=1', baseURL).href);
   expect(href).toBe(`intent://pair?v=1&pc=Desk%20PC&fp=${fp}&port=8766&h=192.168.1.10%2C100.64.0.7&c=${'A'.repeat(22)}`
-    + '#Intent;scheme=phonebox;package=net.oxog.phonebox.deskpanel;S.browser_fallback_url=https%3A%2F%2Fersinkoc.github.io%2Fphonebox%2Fpair%2F%3Fcannot-open%3D1;end');
+    + `#Intent;scheme=phonebox;package=net.oxog.phonebox.deskpanel;S.browser_fallback_url=${fallbackUrl};end`);
   // the button stays pinned to the app's package; the plain link is a separate choice for browsers that open a store (#175)
   await expect(page.locator('#plainWrap')).toBeVisible();
   expect(await page.locator('#plain').getAttribute('href')).toBe(`phonebox://pair?v=1&pc=Desk%20PC&fp=${fp}&port=8766&h=192.168.1.10%2C100.64.0.7&c=${'A'.repeat(22)}`);
@@ -645,18 +646,19 @@ test('the pairing page hands a checked link to the app and clears it from the ad
   await expect(page.locator('#ok')).toBeHidden();
   expect(page.url()).toBe(new URL('/pair/', baseURL).href);
   await page.goto('about:blank'); // a hash-only change would not run the page again
-  await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=8766&h=8.8.8.8&c=${'A'.repeat(22)}`); // not a local address
+  await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=8766&h=127.0.0.1&c=${'A'.repeat(22)}`); // loopback rejected
   await expect(page.locator('#bad')).toBeVisible();
   await page.goto('about:blank');
   await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=99999&h=192.168.1.10&c=${'A'.repeat(22)}`); // no such port
   await expect(page.locator('#bad')).toBeVisible();
   await page.goto('about:blank');
-  await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=8766&h=192.168.1.10,8.8.8.8&c=${'A'.repeat(22)}`); // a public address is dropped
-  await expect(page.locator('#hosts')).toHaveText('192.168.1.10 (port 8766)');
-  expect(await page.locator('#open').getAttribute('href')).toContain('&h=192.168.1.10&');
+  await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=8766&h=192.168.1.10,8.8.8.8&c=${'A'.repeat(22)}`); // public + LAN kept for remote
+  await expect(page.locator('#hosts')).toHaveText('192.168.1.10, 8.8.8.8 (port 8766)');
+  expect(await page.locator('#open').getAttribute('href')).toContain('&h=192.168.1.10%2C8.8.8.8&');
   await page.goto('about:blank');
-  await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=8766&h=8.8.8.8&c=${'A'.repeat(22)}`);
-  await expect(page.locator('#bad')).toBeVisible();
+  await page.goto(`/pair/#v=1&pc=x&fp=${fp}&port=8766&h=home.example.com&c=${'A'.repeat(22)}`);
+  await expect(page.locator('#ok')).toBeVisible();
+  await expect(page.locator('#hosts')).toHaveText('home.example.com (port 8766)');
   await page.goto('about:blank');
   await page.goto('/pair/#v=1&fp=nope');
   await expect(page.locator('#bad')).toBeVisible();
