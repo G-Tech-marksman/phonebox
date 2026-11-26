@@ -234,5 +234,27 @@ public static class Lan
         return LanAccess.Denied;
     }
 
+    /// <summary>
+    /// Host header allowed for the Settings UI when listening on all interfaces (loopback, LAN IP, VPN hostname).
+    /// </summary>
+    public static bool IsAllowedSettingsHost(string? host, LanConfig lan)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        var h = host.Trim().TrimEnd('.');
+        if (h.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) || h.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (IPAddress.TryParse(h, out var ip))
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
+            var b = ip.GetAddressBytes();
+            if (b[0] == 127) return true;
+            if (b[0] == 169 && b[1] == 254) return false; // link-local
+            // Any other IPv4: LAN / VPN / public NIC — Settings is intentionally reachable off-loopback on this fork.
+            return true;
+        }
+        if (AdvertisedHosts(lan).Any(a => a.Equals(h, StringComparison.OrdinalIgnoreCase))) return true;
+        return IsAdvertiseHost(h);
+    }
+
     public static IPAddress Any => IPAddress.Any;
 }

@@ -41,6 +41,21 @@ public sealed class LanAdvertiseTests
     }
 
     [Fact]
+    public void IsAllowedSettingsHostAcceptsLoopbackLanAndAdvertiseDns()
+    {
+        var lan = new LanConfig { Enabled = true, AdvertiseHosts = ["vpn2-g-tech.tech"] };
+        Assert.True(Lan.IsAllowedSettingsHost("127.0.0.1", lan));
+        Assert.True(Lan.IsAllowedSettingsHost("localhost", lan));
+        Assert.True(Lan.IsAllowedSettingsHost("192.168.1.101", lan));
+        Assert.True(Lan.IsAllowedSettingsHost("10.0.0.5", lan));
+        Assert.True(Lan.IsAllowedSettingsHost("vpn2-g-tech.tech", lan));
+        Assert.True(Lan.IsAllowedSettingsHost("home.example.com", lan)); // valid advertise-shaped DNS
+        Assert.False(Lan.IsAllowedSettingsHost("169.254.1.1", lan));
+        Assert.False(Lan.IsAllowedSettingsHost("", lan));
+        Assert.False(Lan.IsAllowedSettingsHost(null, lan));
+    }
+
+    [Fact]
     public void NormalizeAdvertiseHostsDedupesAndCaps()
     {
         var list = Lan.NormalizeAdvertiseHosts(["home.example.com", " home.example.com ", "203.0.113.10", "127.0.0.1", "a,b"]);

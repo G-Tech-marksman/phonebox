@@ -16,7 +16,7 @@
   With options (must use scriptblock form; plain iex cannot pass parameters):
 
     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -NoPhone
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.7
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.8
 
   Or set $env:PHONEBOX_REPO = 'G-Tech-marksman/phonebox' before running.
 
@@ -64,7 +64,7 @@ if ($Repo -match '^https?://github\.com/([^/]+)/([^/#?]+)') { $Repo = "$($Matche
 $Repo = $Repo.Trim().Trim('/')
 if ($Repo -notmatch '^[^/\s]+/[^/\s]+$') { throw "Invalid -Repo '$Repo' (expected owner/name, for example G-Tech-marksman/phonebox)." }
 $Package = 'net.oxog.phonebox.deskpanel'
-# Settings HTTP + Wi-Fi/VPN pairing share TCP 1766 (HTTP on 127.0.0.1; HTTPS on other NICs).
+# Settings HTTP + phone Wi-Fi share TCP 1766 on all interfaces (loopback + LAN/VPN).
 $SettingsUrl = 'http://127.0.0.1:1766'
 $LanPort = 1766
 

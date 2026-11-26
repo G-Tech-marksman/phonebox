@@ -76,7 +76,7 @@ To pass options:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -NoPhone
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.7
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.8
 ```
 
 ```sh
@@ -86,10 +86,10 @@ curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk
 
 <details><summary><b>Repair after a bad install (Windows)</b></summary>
 
-If setup finished but the agent never answered (`agent.log` under `%LOCALAPPDATA%\PhoneBox`), re-run setup so it replaces the app with the latest fork release (needs **v0.9.29-gtech.7** or newer — that zip is the real Windows WinForms/`WinExe` build; it **forces** Wi-Fi listen port **1766** even if config still says 8766):
+If setup finished but the agent never answered (`agent.log` under `%LOCALAPPDATA%\PhoneBox`), re-run setup so it replaces the app with the latest fork release (needs **v0.9.29-gtech.8** or newer — that zip is the real Windows WinForms/`WinExe` build; it **forces** listen port **1766** on all interfaces even if config still says 8766):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Yes -Version 0.9.29-gtech.7
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Yes -Version 0.9.29-gtech.8
 ```
 
 Then open http://127.0.0.1:1766. If it still fails, open `%LOCALAPPDATA%\PhoneBox\agent.log` and paste the **last ~40 lines** (especially any `Exception` / `fail` / `error` lines). Also confirm Explorer shows `PhoneBoxAgent.exe` still under `%LOCALAPPDATA%\PhoneBox\app` (antivirus sometimes deletes it).
@@ -113,10 +113,10 @@ Then open http://127.0.0.1:1766. If it still fails, open `%LOCALAPPDATA%\PhoneBo
   policy can block the agent too; its administrator can allow it.
 - **USB debugging gives a computer you allow control over the phone.** Allow only your own computers. You can
   withdraw them on the phone under *Developer options › Revoke USB debugging authorisations*.
-- **Wi-Fi is off until you turn it on.** Until then the agent listens only on this computer (`127.0.0.1:1766`).
-  When you turn it on, Windows asks to let PhoneBox through the firewall: allow *Private* networks only. On Linux
-  with ufw or firewalld, open TCP port 1766 for your local network. Every connection PhoneBox makes is listed in
-  the [privacy policy](../PRIVACY.md).
+- **Settings listens on all interfaces on TCP 1766** (`http://127.0.0.1:1766`, `http://192.168.x.x:1766`, or your
+  advertise / VPN host). Phone Wi-Fi (when enabled) shares that same cleartext port with a paired token. Allow
+  inbound TCP **1766** on the PC firewall for Private / VPN networks when another laptop or phone should open Settings
+  or pair. Every connection PhoneBox makes is listed in the [privacy policy](../PRIVACY.md).
 - **Linux USB permissions**: if `adb devices` shows `no permissions`, adb also needs udev rules. Install
   `android-sdk-platform-tools-common` on Debian/Ubuntu or `android-udev` on Arch. Some systems also need the
   `plugdev` group (`sudo usermod -aG plugdev $USER`, then log out and in). Setup points this out when it happens.
@@ -166,7 +166,8 @@ Then open http://127.0.0.1:1766. If it still fails, open `%LOCALAPPDATA%\PhoneBo
   *Settings › General › Wi-Fi & Tailscale*, click **Pair a phone over Wi-Fi** and scan the QR code (see
   [Wi-Fi & Tailscale](#wi-fi--tailscale)).
 
-The settings are at <http://127.0.0.1:1766>, on Windows also from the tray icon.
+The settings are at <http://127.0.0.1:1766> (same PC), or from another machine on the LAN/VPN at
+`http://<this-PC-IP>:1766` (for example `http://192.168.1.101:1766`). On Windows also from the tray icon.
 
 ### Other ways to install
 
@@ -346,9 +347,11 @@ status line shows which one it uses.
   5. On the PC firewall, allow inbound TCP **1766** for PhoneBoxAgent (and ensure your VPN path delivers that port to this PC — PhoneBox cannot create the VPN tunnel for you).
   6. **Pair a phone over Wi-Fi**: the QR / Copy pairing link / agent `/pair/` page list `vpn2-g-tech.tech` first and use port `1766`. Or on the phone use **Connect with link or host** with host `vpn2-g-tech.tech`, port `1766`, plus the fingerprint and one-time code from the pairing window.
 
-  Note: tray / setup open **Settings** at `http://127.0.0.1:1766`. Phone pairing and VPN use the same TCP **1766** (HTTPS on network interfaces).
+  Note: tray / setup open **Settings** at `http://127.0.0.1:1766`. From another laptop use
+  `http://192.168.1.101:1766` (replace with this PC's LAN IP) or `http://vpn2-g-tech.tech:1766` when that name
+  resolves on your VPN. Phone pairing uses the same TCP **1766** over HTTP + token on this fork.
 
-  PhoneBox listens on all interfaces once Wi-Fi is on; reachability of `vpn2-g-tech.tech:1766` depends on your VPN DNS and routing. From this environment that name did not resolve (NXDOMAIN), so live end-to-end connectivity was not verified here.
+  Reachability of `vpn2-g-tech.tech:1766` depends on your VPN DNS and routing. From this environment that name did not resolve (NXDOMAIN), so live end-to-end connectivity was not verified here.
 - Windows Firewall asks once when Wi-Fi is turned on; allow it for the network types you use (and Tailscale / VPN).
 - The screen stays on, so the phone still needs a charger — just not necessarily the PC.
 

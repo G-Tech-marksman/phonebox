@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Cleartext HTTP is allowed only for the local agent reached over USB (adb reverse). -->
+<!--
+  Cleartext HTTP: USB adb reverse (127.0.0.1) and, on this fork, Wi-Fi/VPN when the agent serves
+  Settings + phone API on the same TCP port over HTTP (e.g. http://192.168.x.x:1766).
+-->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">localhost</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

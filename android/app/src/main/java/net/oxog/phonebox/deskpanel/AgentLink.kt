@@ -264,18 +264,27 @@ class AgentLink(private val context: Context) {
         // (preferredHost indexes the active computer's addresses, so another computer neither uses nor sets it)
         val order = hosts.indices.sortedBy { if (target == null && it == preferredHost) -1 else it }
         for (i in order) {
+            val host = hosts[i]
+            val connectMs = if (PairLink.isLocalAddress(host)) 1500 else 12_000
+            // Prefer pinned HTTPS; fall back to HTTP when the agent serves Settings+Wi-Fi on one cleartext port (fork :1766).
             try {
-                val host = hosts[i]
                 val c = URL("https://$host:$port$pathAndQuery").openConnection() as HttpsURLConnection
                 c.sslSocketFactory = f
                 c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
-                // public / DDNS / MagicDNS / VPN need a longer connect than same-LAN or Tailscale CGNAT IPv4
-                c.connectTimeout = if (PairLink.isLocalAddress(host)) 1500 else 12_000
+                c.connectTimeout = connectMs
                 c.setRequestProperty("Authorization", "Bearer $token")
                 val r = send(c, method, readTimeout, body, contentType)
                 if (target == null) preferredHost = i
                 return r
-            } catch (e: Exception) {
+            } catch (_: Exception) { }
+            try {
+                val c = URL("http://$host:$port$pathAndQuery").openConnection() as HttpURLConnection
+                c.connectTimeout = connectMs
+                c.setRequestProperty("Authorization", "Bearer $token")
+                val r = send(c, method, readTimeout, body, contentType)
+                if (target == null) preferredHost = i
+                return r
+            } catch (_: Exception) {
                 // try the next address
             }
         }
@@ -691,36 +700,31 @@ class AgentLink(private val context: Context) {
         val pinned = pinnedFactory(link.fingerprint)
         var problem: PairFailure = PairFailure.Unreachable(link.pc, link.hosts)
         for (host in link.hosts) {
-            try {
-                val remote = !PairLink.isLocalAddress(host)
-                val c = URL("https://$host:${link.port}/api/pair/claim").openConnection() as HttpsURLConnection
+            val remote = !PairLink.isLocalAddress(host)
+            val connectMs = if (remote) 20_000 else 3000
+            val readMs = if (remote) 20_000 else 8000
+            val body = JSONObject().put("code", link.code).toString().toByteArray()
+            fun claimOn(c: HttpURLConnection): PairFailure? {
                 c.instanceFollowRedirects = false
-                c.sslSocketFactory = pinned
-                c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
-                // WAN / DDNS / VPN needs more time than same-LAN; TLS pin still authenticates the PC
-                c.connectTimeout = if (remote) 20_000 else 3000
-                c.readTimeout = if (remote) 20_000 else 8000
+                c.connectTimeout = connectMs
+                c.readTimeout = readMs
                 c.requestMethod = "POST"
                 c.doOutput = true
                 c.setRequestProperty("Content-Type", "application/json")
                 c.setRequestProperty("X-PhoneBox-Model", deviceModel)
-                c.outputStream.use { it.write(JSONObject().put("code", link.code).toString().toByteArray()) }
+                c.outputStream.use { it.write(body) }
                 when (c.responseCode) {
                     200 -> {}
                     403 -> return PairFailure.CodeRejected(link.pc)
-                    else -> { problem = PairFailure.BadAnswer(link.pc, c.responseCode); continue }
+                    else -> { problem = PairFailure.BadAnswer(link.pc, c.responseCode); return PairFailure.BadAnswer(link.pc, c.responseCode) }
                 }
                 val j = JSONObject(c.inputStream.bufferedReader().readText())
                 if (!j.optString("fingerprint").equals(link.fingerprint, ignoreCase = true)) return PairFailure.WrongCertificate(link.pc)
-                // keep hosts the user typed / link carried first; then the agent's LAN + advertised remote list
                 val fromAgent = j.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.getString(it) } }
                     ?.filter { PairLink.isAllowedHost(it) } ?: emptyList()
                 val hosts = (link.hosts + fromAgent).distinct().take(8).ifEmpty { link.hosts }
-                // the name the user confirmed; only an entry for this very certificate is replaced, never one that
-                // merely has the same name
                 val reportedMacs = WakePacket.macsFrom(j.optJSONArray("macs"))
                 synchronized(pcsLock) {
-                    // an empty report (an adapter briefly not eligible) must not wipe the MACs already stored for it
                     val id = link.fingerprint.lowercase()
                     val pc = Pc(id, link.pc, hosts, j.optInt("port", link.port), j.getString("token"),
                         reportedMacs ?: pcs.firstOrNull { it.id == id }?.macs ?: emptyList())
@@ -729,9 +733,23 @@ class AgentLink(private val context: Context) {
                     preferredHost = 0
                 }
                 return null
-            } catch (e: javax.net.ssl.SSLException) {
-                problem = PairFailure.WrongCertificate(link.pc)
-            } catch (e: Exception) {
+            }
+            try {
+                val c = URL("https://$host:${link.port}/api/pair/claim").openConnection() as HttpsURLConnection
+                c.sslSocketFactory = pinned
+                c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER
+                val err = claimOn(c)
+                if (err == null) return null
+                if (err is PairFailure.CodeRejected || err is PairFailure.WrongCertificate) return err
+            } catch (_: Exception) {
+                // no HTTPS on this host:port (fork cleartext Wi-Fi) — try HTTP below
+            }
+            try {
+                val c = URL("http://$host:${link.port}/api/pair/claim").openConnection() as HttpURLConnection
+                val err = claimOn(c)
+                if (err == null) return null
+                if (err is PairFailure.CodeRejected || err is PairFailure.WrongCertificate) return err
+            } catch (_: Exception) {
                 // try the next address
             }
         }

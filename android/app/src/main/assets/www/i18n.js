@@ -636,7 +636,7 @@
       's.wifi.title': 'Wi-Fi & Tailscale',
       's.wifi.enable': 'Let the phone connect without the USB cable',
       's.wifi.port': 'Port',
-      's.wifi.portHint': 'Fixed at 1766: Settings opens at http://127.0.0.1:1766 and Wi-Fi/VPN pairing uses the same TCP port (HTTPS on your network interfaces). Older installs are migrated on startup. Forward TCP 1766 on your router/VPN for remote access (or use Tailscale).',
+      's.wifi.portHint': 'Fixed at 1766: Settings listens on all interfaces (http://127.0.0.1:1766, http://<LAN-IP>:1766, or your advertise host). Phone Wi-Fi uses the same TCP port over HTTP + token. Older installs are migrated on startup. Allow TCP 1766 on the PC firewall / router / VPN for another laptop or phone.',
       's.wifi.pair': 'Pair a phone over Wi-Fi',
       's.wifi.newKey': 'New key (unpair phones)',
       's.pair.copyPage': 'Copy agent page link',

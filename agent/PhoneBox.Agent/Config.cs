@@ -312,12 +312,13 @@ public sealed class DisplayConfig
 public sealed class LanConfig
 {
     /// <summary>
-    /// Fixed port for this fork: local Settings HTTP (<c>http://127.0.0.1:1766</c>) and Wi-Fi/VPN HTTPS (non-loopback
-    /// NICs). Older configs with 8766 (or any other <c>lan.port</c>) are rewritten to this on load.
+    /// Fixed port for this fork: Settings HTTP on all interfaces (<c>http://127.0.0.1:1766</c>,
+    /// <c>http://&lt;LAN-IP&gt;:1766</c>, advertise hosts) and phone Wi-Fi on the same TCP port (HTTP + token).
+    /// Older configs with 8766 (or any other <c>lan.port</c>) are rewritten to this on load.
     /// </summary>
     public const int FixedPort = 1766;
 
-    /// <summary>Also accept the phone over Wi-Fi (HTTPS + token, paired over USB). Requires an agent restart.</summary>
+    /// <summary>Also accept the phone over Wi-Fi (HTTP + token on this fork's fixed port, or HTTPS when port differs). Requires an agent restart.</summary>
     public bool Enabled { get; set; }
     /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale / VPN (always <see cref="FixedPort"/>). Pairing links and the phone use the same value.</summary>
     public int Port { get; set; } = FixedPort;

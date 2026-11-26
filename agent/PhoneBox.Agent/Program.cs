@@ -43,17 +43,14 @@ AppPaths.RestrictConfig(configPath);
 var configStore = new ConfigStore(configPath);
 configStore.PersistGenerated(); // keep the Wi-Fi token stable across restarts
 var lanCfg = configStore.Get().Lan;
-// Wi-Fi HTTPS can share the Settings TCP port: HTTP stays on 127.0.0.1, HTTPS binds non-loopback NICs only.
-// --no-wifi-listen: Settings-only retry after a Wi-Fi NIC bind failed and aborted Kestrel (see Run below).
+// Settings HTTP binds 0.0.0.0:Port so loopback + LAN/VPN IPs work. When lan.port equals that port (fork default),
+// phone Wi-Fi uses the same cleartext listener (token); HTTPS on a second IPv4 bind would conflict.
+// --no-wifi-listen: legacy flag — skips a separate HTTPS listen when lan.port differs from Settings.
 var skipWifiListen = args.Contains("--no-wifi-listen");
 var lanCert = lanCfg.Enabled ? Lan.Certificate(configDir) : null;
 // USB uses the same certificate as Wi-Fi; the agent hands its fingerprint to the app over adb (see UsbLink.cs)
 var usbCert = lanCert ?? Lan.Certificate(configDir);
 var usb = new UsbLink(UsbLink.FreeLoopbackPort(), Lan.Fingerprint(usbCert));
-// Probe before Listen: one unboundable NIC must not prevent Settings HTTP from coming up (setup health check).
-var wifiBindIps = !skipWifiListen && lanCert is not null && lanCfg.Port == Port
-    ? Lan.WifiBindAddressesThatBind(lanCfg.Port)
-    : [];
 if (!Lan.TryProbeBind(IPAddress.Loopback, Port))
 {
     try
@@ -76,21 +73,15 @@ builder.WebHost.ConfigureKestrel(k =>
     // a dictation travels in the query (the phone's transport sends no request bodies): 1000 characters of any script,
     // percent-encoded, fit in 16 KB
     k.Limits.MaxRequestLineSize = 16 * 1024;
-    // Settings + hooks: HTTP on loopback (default port 1766 — same number as Wi-Fi / VPN pairing).
-    k.Listen(IPAddress.Loopback, Port);
+    // Settings (+ phone cleartext when Wi-Fi shares this port): HTTP on all interfaces so
+    // http://127.0.0.1:1766, http://192.168.x.x:1766, and http://vpn-host:1766 all work.
+    // HTTPS cannot also bind IPv4 :1766 while 0.0.0.0:1766 is taken — phone uses HTTP+token on this fork when ports match.
+    k.Listen(IPAddress.Any, Port);
     // USB: the end of the phone's adb reverse tunnel, on a port of its own, over TLS the app pins, with the app's key
     k.Listen(IPAddress.Loopback, usb.Port, l => l.UseHttps(usbCert));
-    // Wi-Fi / Tailscale / VPN: HTTPS with a pinned self-signed certificate, token required (see Lan.cs).
-    if (lanCert is not null && !skipWifiListen)
-    {
-        if (lanCfg.Port == Port)
-        {
-            foreach (var ip in wifiBindIps)
-                k.Listen(ip, lanCfg.Port, l => l.UseHttps(lanCert));
-        }
-        else
-            k.Listen(IPAddress.Any, lanCfg.Port, l => l.UseHttps(lanCert));
-    }
+    // Wi-Fi HTTPS only when it uses a different TCP port than Settings (not the fixed-1766 fork default).
+    if (lanCert is not null && !skipWifiListen && lanCfg.Port != Port)
+        k.Listen(IPAddress.Any, lanCfg.Port, l => l.UseHttps(lanCert));
 });
 builder.Logging.ClearProviders();
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
@@ -269,13 +260,10 @@ app.Use(async (ctx, next) =>
 app.MapGet("/api/latency", () => Results.Json(timings.Summary()));
 
 // Security:
-//  - Local Settings HTTP listens on 127.0.0.1 only (default port 1766); the Host check blocks DNS rebinding. From
-//    browsers only the settings page itself (same origin) is accepted (no CSRF).
-//  - The phone's USB tunnel ends on a port of its own (UsbLink): every app on the phone can reach the tunnel, so it
-//    is TLS with the certificate the app pins (handed over adb), needs the key the PhoneBox app made (read over adb),
-//    and serves only the phone API.
-//  - The optional Wi-Fi listener serves the phone API over TLS with the paired token (same TCP port as Settings when
-//    both use 1766: HTTPS on non-loopback NICs only).
+//  - Settings HTTP listens on 0.0.0.0:1766 (loopback + LAN + VPN). Host allowlist + same-origin / Sec-Fetch block CSRF.
+//  - USB: TLS + app key on a port of its own.
+//  - Wi-Fi when lan.port == Settings port (fork default 1766): phone uses HTTP + paired token on the same listener
+//    (HTTPS cannot share IPv4 :1766 with 0.0.0.0). When lan.port differs, HTTPS on that port as upstream.
 app.UseWebSockets();
 app.UseRouting();
 app.Use(async (ctx, next) =>
@@ -314,17 +302,56 @@ app.Use(async (ctx, next) =>
             return;
         }
     }
-    else
+    else if (ctx.Connection.LocalPort == Port && !ctx.Request.IsHttps)
     {
+        var lan = configStore.Get().Lan;
+        // Phone / webhook / pair over cleartext HTTP when Settings and Wi-Fi share port 1766 (no separate HTTPS bind).
+        if (lan.Enabled && origin == "")
+        {
+            var access = Lan.AuthorizeRequest(lan, ctx.Request.Method, ctx.Request.Path, origin,
+                ctx.Request.Headers.Authorization, ctx.Request.Query["token"]);
+            if (access is not Lan.LanAccess.Denied)
+            {
+                if (access is Lan.LanAccess.PairingClaim or Lan.LanAccess.Webhook or Lan.LanAccess.PairPage)
+                {
+                    if (access == Lan.LanAccess.PairingClaim)
+                        ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!.MaxRequestBodySize = 1024;
+                    ctx.Response.Headers.CacheControl = "no-store";
+                    await next();
+                    return;
+                }
+                // Phone panel API — fall through to shared post-auth handling below
+            }
+            else if (Lan.IsPairPage(ctx.Request.Method, ctx.Request.Path))
+            {
+                ctx.Response.Headers.CacheControl = "no-store";
+                await next();
+                return;
+            }
+            else if (!string.IsNullOrEmpty(ctx.Request.Headers.Authorization))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+            // else: browser Settings UI (no Authorization) — Host allowlist below
+        }
+
         var host = ctx.Request.Host.Host;
+        var selfOrigin = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
         var spotifyCallback = ctx.Request.Method == "GET" && ctx.Request.Path == "/api/controls/spotify/callback"
             && app.Services.GetRequiredService<SpotifyControl>().HasPendingState(ctx.Request.Query["state"]);
-        if ((host != "127.0.0.1" && host != "localhost") || (origin != "" && !SameOrigins.Contains(origin))
+        if (!Lan.IsAllowedSettingsHost(host, lan)
+            || (origin != "" && origin != selfOrigin && !SameOrigins.Contains(origin))
             || (!spotifyCallback && BrowserGuard.IsForeign(ctx.Request.Headers["Sec-Fetch-Site"], ctx.Request.Headers["Sec-Fetch-Mode"], ctx.Request.Method, ctx.Request.Path)))
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
+    }
+    else
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
     }
     // any request from the app shows the phone is there, not only a state poll: an app on the live stream polls
     // nothing, and a stream that is not yet (or no longer) open must not hide the phone from a permission prompt (#497)
@@ -1296,17 +1323,11 @@ app.MapDelete("/api/settings/shortcut-icon", (string id, HttpRequest req, Config
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
-    app.Logger.LogInformation("PhoneBox agent {Version} ready on http://127.0.0.1:{Port}, phone USB port {UsbPort} (config: {Path})",
-        AppPaths.Version, Port, usb.Port, configPath);
-    if (skipWifiListen)
-        app.Logger.LogWarning("Started without Wi-Fi HTTPS binds (--no-wifi-listen); Settings HTTP is on 127.0.0.1:{Port}. Fix NIC binds or excluded ports, then Restart.", Port);
-    else if (lanCert is not null && lanCfg.Port == Port)
-    {
-        if (wifiBindIps.Count == 0)
-            app.Logger.LogWarning("Wi-Fi is on but no non-loopback IPv4 could bind HTTPS :{Port}; Settings HTTP is on 127.0.0.1:{Port}. Connect a network/VPN and Restart.", Port, Port);
-        else
-            app.Logger.LogInformation("Wi-Fi / VPN HTTPS on port {Port} bound to: {Addresses}", Port, string.Join(", ", wifiBindIps));
-    }
+    app.Logger.LogInformation(
+        "PhoneBox agent {Version} ready on http://0.0.0.0:{Port} (e.g. http://127.0.0.1:{Port}, LAN/VPN http://<host>:{Port}), phone USB port {UsbPort} (config: {Path})",
+        AppPaths.Version, Port, Port, Port, usb.Port, configPath);
+    if (lanCfg.Enabled && lanCfg.Port == Port)
+        app.Logger.LogInformation("Wi-Fi shares TCP {Port} over HTTP (phone uses token; open Settings from another PC as http://<advertise-host>:{Port}/)", Port, Port);
 });
 
 // macOS, running as PhoneBox.app: the main thread belongs to the menu bar icon and the host runs beside it (MenuBarHost)
@@ -1314,26 +1335,16 @@ try
 {
     if (!MenuBarHost.TryRun(app, args, endpoint, configDir)) app.Run();
 }
-catch (Exception ex) when (lanCert is not null && !skipWifiListen && lanCfg.Port == Port)
+catch (Exception ex)
 {
-    // A Wi-Fi NIC Listen that passed probe can still fail at Kestrel start on Windows; retry Settings-only so setup's
-    // http://127.0.0.1:1766/api/info health check succeeds.
     try
     {
         Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.LogPath)!);
         File.AppendAllText(AppPaths.LogPath,
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} Wi-Fi HTTPS bind failed; restarting without Wi-Fi listens: {ex}{Environment.NewLine}");
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} agent listen/start failed: {ex}{Environment.NewLine}");
     }
     catch { }
-    single.ReleaseMutex();
-    single.Dispose();
-    var exe = Environment.ProcessPath;
-    if (exe is not null)
-    {
-        var next = args.Where(a => a != "--no-wifi-listen").Concat(["--no-wifi-listen"]).ToArray();
-        System.Diagnostics.Process.Start(AppRestart.StartInfo(exe, next));
-    }
-    return;
+    throw;
 }
 
 // Restart requested from the settings page (e.g. Wi-Fi turned on): hand over to a fresh instance.
