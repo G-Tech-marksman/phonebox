@@ -196,10 +196,10 @@ before you install it.
 ## Security & privacy
 
 The desktop settings server listens on all interfaces on port **1766** (`http://127.0.0.1:1766` locally;
-`http://<LAN-or-VPN-IP>:1766` from another machine). USB reaches the agent through `adb reverse` on a loopback
-port of its own, over TLS with a key the phone app makes and the agent reads over adb.
-Optional Wi-Fi on this fork uses the same TCP **1766** over HTTP with a paired token (HTTPS when the Wi-Fi port differs).
-The phone requests configured actions by ID; commands and integration credentials stay on the computer.
+`http://<LAN-or-VPN-IP>:1766` from another machine) and requires a Settings username/password (Admin or User role).
+USB reaches the agent through `adb reverse` on a loopback port of its own, over TLS with a key the phone app makes
+and the agent reads over adb. Optional Wi-Fi on this fork uses the same TCP **1766** over HTTP with a paired token
+(HTTPS when the Wi-Fi port differs). The phone requests configured actions by ID; commands and integration credentials stay on the computer.
 
 PhoneBox has no telemetry, analytics or accounts of its own. Optional widgets and integrations contact external
 services for weather, quotas, GitHub and other data, and the agent checks GitHub for updates.

@@ -37,6 +37,26 @@ header .ver { color: var(--muted); font-size: 12px; }
 .btn.primary:disabled { opacity: .45; cursor: default; }
 .btn.danger { color: var(--danger); }
 .btn.sm { padding: 4px 9px; font-size: 12.5px; border-radius: 7px; }
+#authGate {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); padding: 24px;
+}
+#authGate[hidden] { display: none !important; }
+.auth-card {
+  width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow); padding: 22px 22px 18px;
+}
+.auth-card h2 { margin: 0 0 6px; font-size: 20px; }
+.auth-card .lead { margin-bottom: 14px; }
+.auth-card .err { color: var(--danger); font-size: 13px; min-height: 1.2em; margin: 0 0 10px; }
+.auth-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+body.auth-locked #hdr, body.auth-locked .layout { visibility: hidden; }
+body.role-user .admin-only { display: none !important; }
+body.role-user #save, body.role-user #revert, body.role-user #restartBtn, body.role-user #updTop { display: none !important; }
+body.role-user .dirty { display: none !important; }
+#usersList .user-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--line); }
+#usersList .user-row:last-child { border-bottom: 0; }
+#usersList .user-meta { flex: 1; min-width: 140px; }
 .icon-btn { border: 1px solid var(--line); background: var(--panel); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; display: grid; place-items: center; }
 .ico { width: 1em; height: 1em; vertical-align: -0.15em; flex: none; }
 .ico.m { margin-right: 0.35em; }
@@ -497,13 +517,26 @@ nav a.on::before { color: var(--accent); }
 }
 </style>
 </head>
-<body>
+<body class="auth-locked">
+<div id="authGate">
+  <form class="auth-card" id="authForm" autocomplete="on">
+    <h2 id="authTitle">Sign in</h2>
+    <p class="lead" id="authLead">Enter your PhoneBox Settings username and password.</p>
+    <div class="field"><label for="authUser">Username</label><input id="authUser" name="username" type="text" autocomplete="username" required maxlength="64"></div>
+    <div class="field"><label for="authPass">Password</label><input id="authPass" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="200"></div>
+    <div class="field" id="authPass2Wrap" hidden><label for="authPass2">Confirm password</label><input id="authPass2" type="password" autocomplete="new-password" minlength="8" maxlength="200"></div>
+    <p class="err" id="authErr" role="alert"></p>
+    <div class="auth-actions"><button class="btn primary" type="submit" id="authSubmit">Sign in</button></div>
+  </form>
+</div>
 <header id="hdr">
   <img src="/favicon.ico" alt="" width="28" height="28">
   <h1>PhoneBox</h1><span class="ver" id="ver"></span>
   <span class="pill" id="phone"><i></i><span data-i18n="s.phoneStatus">Phone…</span></span>
   <button class="btn sm upd-top" id="updTop" hidden></button>
   <div class="spacer"></div>
+  <span class="pill" id="authWho" hidden><span id="authWhoText"></span></span>
+  <button class="btn sm" id="logoutBtn" hidden data-i18n="s.auth.logout">Log out</button>
   <select id="langSel" data-i18n-title="lang.label" title="Language" aria-label="Language" style="padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:12.5px;max-width:160px"></select>
   <span class="dirty" role="status" data-i18n-title="s.unsavedChanges" title="Unsaved changes"><i class="dirty-dot"></i><span data-i18n="s.unsavedChanges">Unsaved changes</span></span>
   <button class="btn primary" id="restartBtn" hidden title="Wi-Fi settings change after a restart" data-i18n="s.restartApply" data-i18n-title="s.restartApplyTitle">Restart to apply</button>
@@ -515,12 +548,13 @@ nav a.on::before { color: var(--accent); }
 <div class="layout">
   <nav id="nav">
     <a href="#pages" class="on" data-i18n="s.nav.pages">Pages</a>
-    <a href="#shortcuts" data-i18n="s.nav.shortcuts">Shortcuts</a>
-    <a href="#rules" data-i18n="s.nav.rules">Rules</a>
-    <a href="#webhooks" data-i18n="s.nav.webhooks">Webhooks</a>
-    <a href="#general" data-i18n="s.nav.general">General</a>
-    <a href="#wifi" data-i18n="s.nav.wifi">Wi-Fi &amp; Tailscale</a>
-    <a href="#advanced" data-i18n="s.nav.advanced">Advanced</a>
+    <a href="#shortcuts" class="admin-only" data-i18n="s.nav.shortcuts">Shortcuts</a>
+    <a href="#rules" class="admin-only" data-i18n="s.nav.rules">Rules</a>
+    <a href="#webhooks" class="admin-only" data-i18n="s.nav.webhooks">Webhooks</a>
+    <a href="#general" class="admin-only" data-i18n="s.nav.general">General</a>
+    <a href="#wifi" class="admin-only" data-i18n="s.nav.wifi">Wi-Fi &amp; Tailscale</a>
+    <a href="#users" class="admin-only" data-i18n="s.nav.users">Users</a>
+    <a href="#advanced" class="admin-only" data-i18n="s.nav.advanced">Advanced</a>
   </nav>
 
   <main>
@@ -1033,6 +1067,29 @@ nav a.on::before { color: var(--accent); }
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0" data-i18n="s.webhooks.currentValues">Current values</h3><button class="btn sm danger" id="whClear" data-i18n="s.webhooks.deleteAll">Delete all</button></div>
         <table class="items"><tbody id="whItems"></tbody></table>
+      </div>
+    </section>
+
+    <section id="users" class="admin-only">
+      <h2 data-i18n="s.nav.users">Users</h2>
+      <p class="lead" data-i18n="s.users.lead">Accounts for this Settings page (including remote/LAN access). Admin can change all settings, pairing and users. User can only open Pages and the live panel preview.</p>
+      <div class="card">
+        <h3 data-i18n="s.users.list">Accounts</h3>
+        <div id="usersList"><p class="hint" data-i18n="s.users.empty">No users yet.</p></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="s.users.add">Add user</h3>
+        <div class="grid2">
+          <div class="field"><label for="newUserName" data-i18n="s.users.username">Username</label><input id="newUserName" type="text" maxlength="64" autocomplete="off"></div>
+          <div class="field"><label for="newUserRole" data-i18n="s.users.role">Role</label>
+            <select id="newUserRole"><option value="User">User</option><option value="Admin">Admin</option></select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label for="newUserPass" data-i18n="s.users.password">Password</label><input id="newUserPass" type="password" minlength="8" maxlength="200" autocomplete="new-password"></div>
+          <div class="field"><label for="newUserPass2" data-i18n="s.users.password2">Confirm password</label><input id="newUserPass2" type="password" minlength="8" maxlength="200" autocomplete="new-password"></div>
+        </div>
+        <div class="row"><button class="btn primary" type="button" id="newUserAdd" data-i18n="s.users.create">Create user</button><span class="hint" id="newUserErr" style="color:var(--danger)"></span></div>
       </div>
     </section>
 
@@ -4380,19 +4437,191 @@ function fitLeads() {
 }
 window.addEventListener('resize', fitLeads);
 
+let authUser = null;
+let authNeedsSetup = false;
+
+function applyRoleUi() {
+  const role = authUser?.role || '';
+  document.body.classList.toggle('role-user', role === 'User');
+  document.body.classList.toggle('role-admin', role === 'Admin');
+  $('authWho').hidden = !authUser;
+  $('logoutBtn').hidden = !authUser;
+  if (authUser) $('authWhoText').textContent = `${authUser.username} · ${authUser.role}`;
+  if (role === 'User') {
+    const id = (location.hash || '#pages').slice(1);
+    if (id !== 'pages') location.hash = '#pages';
+  }
+}
+
+function showAuthGate(needsSetup) {
+  authNeedsSetup = !!needsSetup;
+  document.body.classList.add('auth-locked');
+  $('authGate').hidden = false;
+  $('authTitle').textContent = needsSetup ? 'Create admin account' : 'Sign in';
+  $('authLead').textContent = needsSetup
+    ? 'First run: choose a username and password for the Admin account that manages Settings.'
+    : 'Enter your PhoneBox Settings username and password.';
+  $('authPass2Wrap').hidden = !needsSetup;
+  $('authPass').autocomplete = needsSetup ? 'new-password' : 'current-password';
+  $('authSubmit').textContent = needsSetup ? 'Create admin' : 'Sign in';
+  $('authErr').textContent = '';
+  $('authUser').focus();
+}
+
+function hideAuthGate() {
+  document.body.classList.remove('auth-locked');
+  $('authGate').hidden = true;
+}
+
+async function renderUsers() {
+  if (!authUser || authUser.role !== 'Admin') return;
+  const box = $('usersList');
+  try {
+    const j = await (await fetch('/api/users')).json();
+    const users = j.users || [];
+    if (!users.length) { box.innerHTML = '<p class="hint">No users yet.</p>'; return; }
+    box.replaceChildren(...users.map((u) => {
+      const row = h('div', { class: 'user-row' },
+        h('div', { class: 'user-meta' }, h('b', {}, u.username), ' · ', u.role),
+      );
+      const roleSel = h('select', {},
+        h('option', { value: 'Admin', selected: u.role === 'Admin' }, 'Admin'),
+        h('option', { value: 'User', selected: u.role === 'User' }, 'User'));
+      const pass = h('input', { type: 'password', placeholder: 'New password (optional)', minlength: 8, maxlength: 200, autocomplete: 'new-password', style: 'min-width:160px' });
+      const saveBtn = h('button', { type: 'button', class: 'btn sm' }, 'Save');
+      const delBtn = h('button', { type: 'button', class: 'btn sm danger' }, 'Delete');
+      saveBtn.onclick = async () => {
+        const body = { role: roleSel.value };
+        if (pass.value) body.password = pass.value;
+        const r = await fetch('/api/users/' + encodeURIComponent(u.id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j2 = await r.json().catch(() => ({}));
+        if (!r.ok) { toast(j2.error || 'Could not update user', true); return; }
+        toast('User updated');
+        renderUsers();
+      };
+      delBtn.onclick = async () => {
+        if (!confirm(`Delete user “${u.username}”?`)) return;
+        const r = await fetch('/api/users/' + encodeURIComponent(u.id), { method: 'DELETE' });
+        const j2 = await r.json().catch(() => ({}));
+        if (!r.ok) { toast(j2.error || 'Could not delete user', true); return; }
+        toast('User deleted');
+        renderUsers();
+      };
+      row.append(roleSel, pass, saveBtn, delBtn);
+      return row;
+    }));
+  } catch (_) {
+    box.innerHTML = '<p class="hint">Could not load users.</p>';
+  }
+}
+
+$('newUserAdd').onclick = async () => {
+  $('newUserErr').textContent = '';
+  const username = $('newUserName').value.trim();
+  const password = $('newUserPass').value;
+  const password2 = $('newUserPass2').value;
+  const role = $('newUserRole').value;
+  if (password !== password2) { $('newUserErr').textContent = 'Passwords do not match'; return; }
+  const r = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, role }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('newUserErr').textContent = j.error || 'Could not create user'; return; }
+  $('newUserName').value = ''; $('newUserPass').value = ''; $('newUserPass2').value = '';
+  toast('User created');
+  renderUsers();
+};
+
+$('logoutBtn').onclick = async () => {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+  authUser = null;
+  applyRoleUi();
+  showAuthGate(false);
+};
+
+$('authForm').onsubmit = async (e) => {
+  e.preventDefault();
+  $('authErr').textContent = '';
+  const username = $('authUser').value.trim();
+  const password = $('authPass').value;
+  if (authNeedsSetup) {
+    if (password !== $('authPass2').value) { $('authErr').textContent = 'Passwords do not match'; return; }
+    const r = await fetch('/api/auth/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $('authErr').textContent = j.error || 'Setup failed'; return; }
+    authUser = j.user;
+  } else {
+    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $('authErr').textContent = j.error || 'Sign-in failed'; return; }
+    authUser = j.user;
+  }
+  $('authPass').value = ''; $('authPass2').value = '';
+  hideAuthGate();
+  applyRoleUi();
+  await bootApp();
+};
+
+let infoTimer = null;
+async function bootApp() {
+  applyLanguageUi(window.PhoneBoxI18n?.getPref() || 'auto');
+  fitLeads();
+  route();
+  if (authUser?.role === 'Admin') {
+    await load();
+    renderUsers();
+  } else {
+    // User role: pages browse + live preview only
+    try {
+      if (!catalogRaw) catalogRaw = await (await fetch('/api/catalog')).json();
+      const res = await fetch('/api/settings');
+      cfgVersion = res.headers.get('X-Config-Version');
+      cfg = await res.json();
+      fillDefaults();
+      if (window.PhoneBoxI18n) applyLanguageUi(cfg.display?.language || 'auto');
+      else localizeCatalog();
+      renderPages();
+      saved = JSON.stringify(cfg);
+      changed();
+      loadInfo();
+    } catch (_) { toast('Could not load pages', true); }
+  }
+  if (!infoTimer) infoTimer = setInterval(loadInfo, 5000);
+}
+
 function route() {
-  const id = (location.hash || '#pages').slice(1);
+  let id = (location.hash || '#pages').slice(1);
+  if (authUser?.role === 'User' && id !== 'pages') {
+    location.hash = '#pages';
+    id = 'pages';
+  }
   document.querySelectorAll('section').forEach((s) => s.classList.toggle('on', s.id === id));
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + id));
   if (id === 'webhooks') loadPushed();
+  if (id === 'users') renderUsers();
   fitLeads();
 }
 window.addEventListener('hashchange', route);
-route();
-applyLanguageUi(window.PhoneBoxI18n?.getPref() || 'auto');
-fitLeads();
-load();
-setInterval(loadInfo, 5000);
+
+(async function start() {
+  applyLanguageUi(window.PhoneBoxI18n?.getPref() || 'auto');
+  try {
+    const st = await (await fetch('/api/auth/status')).json();
+    if (st.needsSetup) {
+      showAuthGate(true);
+      return;
+    }
+    if (!st.authenticated) {
+      showAuthGate(false);
+      return;
+    }
+    authUser = st.user;
+    hideAuthGate();
+    applyRoleUi();
+    await bootApp();
+  } catch (_) {
+    showAuthGate(false);
+    $('authErr').textContent = 'Could not reach the agent.';
+  }
+})();
 </script>
 </body>
 </html>

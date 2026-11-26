@@ -42,6 +42,7 @@ var configDir = Path.GetDirectoryName(configPath) ?? AppPaths.ConfigDir;
 AppPaths.RestrictConfig(configPath);
 var configStore = new ConfigStore(configPath);
 configStore.PersistGenerated(); // keep the Wi-Fi token stable across restarts
+var settingsAuth = new SettingsAuth(configDir);
 var lanCfg = configStore.Get().Lan;
 // Settings HTTP binds 0.0.0.0:Port so loopback + LAN/VPN IPs work. When lan.port equals that port (fork default),
 // phone Wi-Fi uses the same cleartext listener (token); HTTPS on a second IPv4 bind would conflict.
@@ -90,6 +91,7 @@ builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat =
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
 
 builder.Services.AddSingleton(configStore);
+builder.Services.AddSingleton(settingsAuth);
 builder.Services.AddSingleton(endpoint);
 builder.Services.AddSingleton(usb);
 builder.Services.AddSingleton<AudioControl>();
@@ -305,6 +307,7 @@ app.Use(async (ctx, next) =>
     else if (ctx.Connection.LocalPort == Port && !ctx.Request.IsHttps)
     {
         var lan = configStore.Get().Lan;
+        var phoneOrPairExempt = false;
         // Phone / webhook / pair over cleartext HTTP when Settings and Wi-Fi share port 1766 (no separate HTTPS bind).
         if (lan.Enabled && origin == "")
         {
@@ -320,7 +323,8 @@ app.Use(async (ctx, next) =>
                     await next();
                     return;
                 }
-                // Phone panel API — fall through to shared post-auth handling below
+                // Phone panel API — skip Settings login; fall through to Host + shared post-auth handling
+                phoneOrPairExempt = true;
             }
             else if (Lan.IsPairPage(ctx.Request.Method, ctx.Request.Path))
             {
@@ -333,7 +337,7 @@ app.Use(async (ctx, next) =>
                 ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
             }
-            // else: browser Settings UI (no Authorization) — Host allowlist below
+            // else: browser Settings UI (no Authorization) — Host allowlist + login below
         }
 
         var host = ctx.Request.Host.Host;
@@ -346,6 +350,47 @@ app.Use(async (ctx, next) =>
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
+        }
+
+        // Settings web UI login (not phone/USB/webhook). /api/info stays open for setup health checks.
+        if (!phoneOrPairExempt && !spotifyCallback && !SettingsAuth.IsAnonymousPath(ctx.Request.Path, ctx.Request.Method))
+        {
+            var auth = app.Services.GetRequiredService<SettingsAuth>();
+            if (auth.NeedsSetup && !(ctx.Request.Path == "/" || ctx.Request.Path.StartsWithSegments("/panel")))
+            {
+                // Until an admin exists, only the HTML shell + auth/setup APIs are reachable (APIs gated above / below).
+                if (!(HttpMethods.IsGet(ctx.Request.Method) && (ctx.Request.Path == "/" || ctx.Request.Path.StartsWithSegments("/panel"))))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "Setup required", needsSetup = true });
+                    return;
+                }
+            }
+            else if (!auth.NeedsSetup)
+            {
+                var sessionUser = auth.GetSessionUser(SettingsAuth.ReadSessionCookie(ctx.Request));
+                if (sessionUser is null)
+                {
+                    if (HttpMethods.IsGet(ctx.Request.Method) && (ctx.Request.Path == "/" || ctx.Request.Path.StartsWithSegments("/panel")))
+                    {
+                        // Serve the shell so the login form can load; APIs stay 401.
+                    }
+                    else
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        await ctx.Response.WriteAsJsonAsync(new { error = "Login required" });
+                        return;
+                    }
+                }
+                else if (!SettingsAuth.IsAllowedForRole(sessionUser.Role, ctx.Request.Method, ctx.Request.Path))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "Not allowed for this role" });
+                    return;
+                }
+                else
+                    ctx.Items[SettingsAuth.ItemKey] = sessionUser;
+            }
         }
     }
     else
@@ -656,6 +701,79 @@ app.MapGet("/api/info", (AdbReverse adb, ConfigStore cfg, SystemMonitor monitor)
     usbProblem = adb.UsbProblem,
     webviewProblem = WebViewDoctor.DiagnoseRecent(PhoneRegistry.All(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
 }));
+
+// ---------------------------------------------------------------- Settings login / users (local Settings port; passwords never logged)
+app.MapGet("/api/auth/status", (HttpRequest req, SettingsAuth auth) =>
+{
+    var user = auth.GetSessionUser(SettingsAuth.ReadSessionCookie(req));
+    return Results.Json(new
+    {
+        needsSetup = auth.NeedsSetup,
+        authenticated = user is not null,
+        user,
+    });
+});
+app.MapPost("/api/auth/setup", async (HttpRequest req, HttpResponse res, SettingsAuth auth) =>
+{
+    if (!auth.NeedsSetup) return Results.Conflict(new { error = "Setup already completed" });
+    var body = await req.ReadFromJsonAsync<AuthCreds>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    if (!auth.TrySetup(body.Username, body.Password, out var user, out var error))
+        return Results.BadRequest(new { error });
+    var token = auth.CreateSession(user!);
+    SettingsAuth.SetSessionCookie(res, token, req.IsHttps);
+    return Results.Json(new { ok = true, user });
+});
+app.MapPost("/api/auth/login", async (HttpRequest req, HttpResponse res, SettingsAuth auth, ILogger<Program> log) =>
+{
+    if (auth.NeedsSetup) return Results.BadRequest(new { error = "Setup required", needsSetup = true });
+    var body = await req.ReadFromJsonAsync<AuthCreds>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    var userName = (body.Username ?? "").Trim();
+    if (!auth.TryAuthenticate(body.Username, body.Password, out var user, out var error))
+    {
+        // username only — never the password
+        log.LogWarning("Settings login failed for user {Username}", userName.Length == 0 ? "(empty)" : userName);
+        return Results.Json(new { error }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+    var token = auth.CreateSession(user!);
+    SettingsAuth.SetSessionCookie(res, token, req.IsHttps);
+    return Results.Json(new { ok = true, user });
+});
+app.MapPost("/api/auth/logout", (HttpRequest req, HttpResponse res, SettingsAuth auth) =>
+{
+    auth.RevokeSession(SettingsAuth.ReadSessionCookie(req));
+    SettingsAuth.ClearSessionCookie(res, req.IsHttps);
+    return Results.Json(new { ok = true });
+});
+app.MapGet("/api/auth/me", (HttpContext ctx) =>
+    ctx.Items[SettingsAuth.ItemKey] is SettingsAuth.UserPublic user
+        ? Results.Json(user)
+        : Results.Unauthorized());
+
+app.MapGet("/api/users", (SettingsAuth auth) => Results.Json(new { users = auth.ListUsers() }));
+app.MapPost("/api/users", async (HttpRequest req, SettingsAuth auth) =>
+{
+    var body = await req.ReadFromJsonAsync<UserWrite>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    if (!auth.TryCreate(body.Username, body.Password, body.Role, out var user, out var error))
+        return Results.BadRequest(new { error });
+    return Results.Json(new { user });
+});
+app.MapPut("/api/users/{id}", async (string id, HttpRequest req, SettingsAuth auth) =>
+{
+    var body = await req.ReadFromJsonAsync<UserWrite>();
+    if (body is null) return Results.BadRequest(new { error = "Invalid body" });
+    if (!auth.TryUpdate(id, body.Username, body.Password, body.Role, out var user, out var error))
+        return Results.BadRequest(new { error });
+    return Results.Json(new { user });
+});
+app.MapDelete("/api/users/{id}", (string id, SettingsAuth auth) =>
+{
+    if (!auth.TryDelete(id, out var error))
+        return Results.BadRequest(new { error });
+    return Results.Json(new { ok = true });
+});
 
 // Phone mic status for the settings page and scripts (local port only: not a phone path, see Lan.AllowedOverLan).
 app.MapGet("/api/phone-mic", (PhoneMic mic) => Results.Json(new { mic = mic.Snapshot() }));
@@ -1364,6 +1482,9 @@ static void AddMonitor<T>(IServiceCollection s) where T : class, IHostedService
 
 /// <summary>Body of POST /api/pair/claim.</summary>
 internal sealed record PairClaim(string? Code);
+
+internal sealed record AuthCreds(string? Username, string? Password);
+internal sealed record UserWrite(string? Username, string? Password, string? Role);
 
 public partial class Program
 {
