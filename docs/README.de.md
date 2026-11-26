@@ -105,7 +105,7 @@ Das Setup lädt das neueste Release herunter, prüft die SHA-256-Prüfsumme und 
 
 ## Sicherheit & Datenschutz
 
-Der Einstellungsserver läuft lokal auf `127.0.0.1:8765` (USB über `adb reverse`, WLAN über HTTPS Port 8766 mit gepinntem Zertifikat). PhoneBox hat keine eigene Telemetrie oder Konten. Siehe [Datenschutzrichtlinie](../PRIVACY.md) und [SECURITY.md](../SECURITY.md).
+Der Einstellungsserver läuft lokal auf `127.0.0.1:8765` (USB über `adb reverse`, WLAN über HTTPS Port 1766 mit gepinntem Zertifikat). PhoneBox hat keine eigene Telemetrie oder Konten. Siehe [Datenschutzrichtlinie](../PRIVACY.md) und [SECURITY.md](../SECURITY.md).
 
 ## Lizenz
 

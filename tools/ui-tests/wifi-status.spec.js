@@ -7,7 +7,7 @@ test('the Wi-Fi status line follows the switch before it is saved', async ({ pag
   const status = page.locator('#lanStatus');
   const toggle = page.locator('[data-bind="lan.enabled"]');
   const flip = () => page.locator('label.switch', { has: toggle }).click(); // the input itself is hidden behind the switch
-  await expect(status).toHaveText('Listening on port 8766 (HTTPS)');
+  await expect(status).toHaveText('Listening on port 1766 (HTTPS)');
 
   await flip();
   await expect(status).toHaveText('Click Save to turn it off');

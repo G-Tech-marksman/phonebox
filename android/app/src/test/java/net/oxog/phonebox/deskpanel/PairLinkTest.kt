@@ -27,6 +27,7 @@ class PairLinkTest {
         assertTrue(AgentLink.PairLink.isAllowedHost("desk.tail1234.ts.net"))
         assertTrue(AgentLink.PairLink.isAllowedHost("8.8.8.8"))
         assertTrue(AgentLink.PairLink.isAllowedHost("home.example.com"))
+        assertTrue(AgentLink.PairLink.isAllowedHost("vpn2-g-tech.tech"))
         assertFalse(AgentLink.PairLink.isAllowedHost("127.0.0.1"))
         assertFalse(AgentLink.PairLink.isAllowedHost("169.254.1.1"))
         assertFalse(AgentLink.PairLink.isAllowedHost("localhost"))

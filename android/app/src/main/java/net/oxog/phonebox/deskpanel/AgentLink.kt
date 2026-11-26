@@ -69,7 +69,7 @@ class AgentLink(private val context: Context) {
             val fp = prefs.getString("fingerprint", null)
             val token = prefs.getString("token", null)
             if (fp != null && token != null) {
-                val pc = Pc(fp, prefs.getString("pc", "") ?: "", prefs.getString("hosts", "")!!.split(',').filter { it.isNotBlank() }, prefs.getInt("port", 8766), token)
+                val pc = Pc(fp, prefs.getString("pc", "") ?: "", prefs.getString("hosts", "")!!.split(',').filter { it.isNotBlank() }, prefs.getInt("port", 1766), token)
                 prefs.edit().clear().putString("pcs", JSONArray().put(pc.json()).toString()).putString("active", fp).apply()
             }
         }
@@ -269,8 +269,8 @@ class AgentLink(private val context: Context) {
                 val c = URL("https://$host:$port$pathAndQuery").openConnection() as HttpsURLConnection
                 c.sslSocketFactory = f
                 c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
-                // public / DDNS / MagicDNS need a longer connect than same-LAN or Tailscale CGNAT IPv4
-                c.connectTimeout = if (PairLink.isLocalAddress(host)) 1500 else 8_000
+                // public / DDNS / MagicDNS / VPN need a longer connect than same-LAN or Tailscale CGNAT IPv4
+                c.connectTimeout = if (PairLink.isLocalAddress(host)) 1500 else 12_000
                 c.setRequestProperty("Authorization", "Bearer $token")
                 val r = send(c, method, readTimeout, body, contentType)
                 if (target == null) preferredHost = i
@@ -697,9 +697,9 @@ class AgentLink(private val context: Context) {
                 c.instanceFollowRedirects = false
                 c.sslSocketFactory = pinned
                 c.hostnameVerifier = PINNED_HOSTNAME_VERIFIER // identity is the pinned certificate
-                // WAN / DDNS needs more time than same-LAN; TLS pin still authenticates the PC
-                c.connectTimeout = if (remote) 12_000 else 3000
-                c.readTimeout = if (remote) 15_000 else 8000
+                // WAN / DDNS / VPN needs more time than same-LAN; TLS pin still authenticates the PC
+                c.connectTimeout = if (remote) 20_000 else 3000
+                c.readTimeout = if (remote) 20_000 else 8000
                 c.requestMethod = "POST"
                 c.doOutput = true
                 c.setRequestProperty("Content-Type", "application/json")

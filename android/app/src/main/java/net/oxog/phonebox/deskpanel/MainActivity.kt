@@ -596,7 +596,7 @@ class MainActivity : Activity(), SensorEventListener {
 
         val linkField = field(context.getString(R.string.pair_manual_link_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, singleLine = false)
         val hostField = field(context.getString(R.string.pair_manual_host_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
-        val portField = field(context.getString(R.string.pair_manual_port_hint), InputType.TYPE_CLASS_NUMBER).apply { setText("8766") }
+        val portField = field(context.getString(R.string.pair_manual_port_hint), InputType.TYPE_CLASS_NUMBER).apply { setText("1766") }
         val fingerprintField = field(context.getString(R.string.pair_manual_fp_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         val codeField = field(context.getString(R.string.pair_manual_code_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         val nameField = field(context.getString(R.string.pair_manual_name_hint), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)

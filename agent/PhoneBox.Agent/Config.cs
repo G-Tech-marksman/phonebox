@@ -313,8 +313,8 @@ public sealed class LanConfig
 {
     /// <summary>Also accept the phone over Wi-Fi (HTTPS + token, paired over USB). Requires an agent restart.</summary>
     public bool Enabled { get; set; }
-    /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale (default 8766). Editable in Settings; Save + Restart to apply. The phone pairing link and manual host+port UI use the same value.</summary>
-    public int Port { get; set; } = 8766;
+    /// <summary>TCP port the agent listens on for Wi-Fi / Tailscale (default 1766). Editable in Settings; Save + Restart to apply. The phone pairing link and manual host+port UI use the same value.</summary>
+    public int Port { get; set; } = 1766;
     /// <summary>
     /// Extra hosts put in the pairing link and offered to the phone: public IP, DDNS name, or Tailscale MagicDNS.
     /// The agent still listens on all interfaces; the user must forward this port or use Tailscale. Empty = LAN/Tailscale

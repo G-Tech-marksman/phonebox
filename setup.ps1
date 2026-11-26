@@ -16,7 +16,7 @@
   With options (must use scriptblock form; plain iex cannot pass parameters):
 
     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -NoPhone
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.3
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.4
 
   Or set $env:PHONEBOX_REPO = 'G-Tech-marksman/phonebox' before running.
 

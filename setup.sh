@@ -7,7 +7,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 # With options:
 #   curl -fsSL .../setup.sh | bash -s -- --no-phone
-#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.3
+#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.4
 # Or: export PHONEBOX_REPO=G-Tech-marksman/phonebox
 #
 # Run it as yourself, not with sudo: it asks for sudo only to install packages, and asks first.
@@ -708,7 +708,7 @@ main() {
   elif [ "$phone" = 1 ]; then info 'Phone app later: plug the phone in and use Settings > General > Install the phone app, or run setup again.'; fi
   info 'Wi-Fi only: install the app from the release page on the phone, then on the computer open'
   info 'Settings > General > Wi-Fi & Tailscale > Pair a phone over Wi-Fi and scan the QR code.'
-  if [ "$os" = linux ]; then info 'With a firewall (ufw, firewalld), Wi-Fi also needs TCP port 8766 open on your local network.'; fi
+  if [ "$os" = linux ]; then info 'With a firewall (ufw, firewalld), Wi-Fi also needs TCP port 1766 open on your local network.'; fi
   info "Until Wi-Fi is on, PhoneBox only listens on this computer. Every connection it makes: https://github.com/$repo/blob/main/PRIVACY.md"
   info 'Updates: PhoneBox updates itself from Settings. Run setup again any time to repair it.'
   info "Uninstall: curl -fsSL https://raw.githubusercontent.com/$repo/main/scripts/uninstall.sh | bash -s -- [--purge] [--apk]"

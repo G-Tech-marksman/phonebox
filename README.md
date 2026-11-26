@@ -197,7 +197,7 @@ before you install it.
 
 The desktop settings server listens on `127.0.0.1:8765`. USB reaches the agent through `adb reverse` on a loopback
 port of its own, over TLS pinned like Wi-Fi, with a key the phone app makes and the agent reads over adb.
-Optional Wi-Fi uses HTTPS on port 8766 with a pinned certificate and a paired key. Settings and pairing endpoints
+Optional Wi-Fi uses HTTPS on port 1766 with a pinned certificate and a paired key. Settings and pairing endpoints
 stay local. The phone requests configured actions by ID; commands and integration credentials stay on the computer.
 
 PhoneBox has no telemetry, analytics or accounts of its own. Optional widgets and integrations contact external

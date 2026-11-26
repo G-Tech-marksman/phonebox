@@ -27,7 +27,7 @@
     <string name="pair_manual_host">Host / address</string>
     <string name="pair_manual_host_hint">192.168.1.10, pc.tailnet.ts.net, or home.example.com</string>
     <string name="pair_manual_port">Port</string>
-    <string name="pair_manual_port_hint">8766</string>
+    <string name="pair_manual_port_hint">1766</string>
     <string name="pair_manual_fp">Certificate fingerprint</string>
     <string name="pair_manual_fp_hint">64 hex characters from the pairing window</string>
     <string name="pair_manual_code">One-time code</string>

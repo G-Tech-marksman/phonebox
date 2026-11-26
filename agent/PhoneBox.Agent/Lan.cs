@@ -63,15 +63,19 @@ public static class Lan
     }
 
     /// <summary>
-    /// Hosts put in the pairing payload: detected LAN/Tailscale addresses, then optional
-    /// <see cref="LanConfig.AdvertiseHosts"/> (public IP, DDNS, MagicDNS) the user typed for remote reachability.
+    /// Hosts put in the pairing payload. User-typed <see cref="LanConfig.AdvertiseHosts"/> (public IP, DDNS,
+    /// MagicDNS, VPN hostname) come first so they are never truncated by many LAN adapters and so a phone on VPN
+    /// tries the remote name before private IPs it cannot reach.
     /// </summary>
     public static IReadOnlyList<string> AdvertisedHosts(LanConfig lan)
     {
         var auto = Addresses();
-        var extras = NormalizeAdvertiseHosts(lan.AdvertiseHosts)
-            .Where(h => !auto.Contains(h, StringComparer.OrdinalIgnoreCase));
-        return auto.Concat(extras).Take(8).ToList();
+        var extras = NormalizeAdvertiseHosts(lan.AdvertiseHosts);
+        // Remote hosts first (dedupe case-insensitively), then auto LAN/Tailscale, capped at eight.
+        return extras
+            .Concat(auto.Where(h => !extras.Contains(h, StringComparer.OrdinalIgnoreCase)))
+            .Take(8)
+            .ToList();
     }
 
     /// <summary>Whether a user-typed host may be advertised or used for remote pairing (IPv4 or DNS name).</summary>

@@ -18,7 +18,7 @@ flowchart LR
     Agent --- Set["Settings page &<br/>layout editor"]
   end
   Proxy -->|"USB: adb reverse → its own loopback port,<br/>pinned TLS + the app's USB key"| Agent
-  Proxy -.->|"Wi-Fi / Tailscale: HTTPS :8766,<br/>pinned certificate + key"| Agent
+  Proxy -.->|"Wi-Fi / Tailscale: HTTPS :1766,<br/>pinned certificate + key"| Agent
   Hooks["Scripts, CI,<br/>Home Assistant"] -->|webhooks| Agent
 ```
 

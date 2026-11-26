@@ -1308,7 +1308,7 @@ public partial class Program
                 collides = false;
                 if (prop.Value.ValueKind != JsonValueKind.Object) continue;
                 var enabled = false;
-                var port = 8766;
+                var port = 1766;
                 foreach (var lp in prop.Value.EnumerateObject())
                 {
                     if (lp.Name.Equals("enabled", StringComparison.OrdinalIgnoreCase) && lp.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)

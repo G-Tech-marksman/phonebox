@@ -249,9 +249,9 @@ public sealed class PairingTests
                 Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(certPath));
 
             Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":8765}}""", 8765));
-            Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true}}""", 8766));
+            Assert.True(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true}}""", 1766));
             Assert.False(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":false,"port":8765}}""", 8765));
-            Assert.False(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":8766}}""", 8765));
+            Assert.False(Program.LanPortCollidesWithLocal("""{"lan":{"enabled":true,"port":1766}}""", 8765));
         }
         finally { Directory.Delete(dir, recursive: true); }
     }

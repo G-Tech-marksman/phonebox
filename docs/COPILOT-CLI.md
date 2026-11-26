@@ -68,7 +68,7 @@ When Copilot CLI runs on Windows, give each entry a `powershell` field next to `
 |---|---|---|
 | The computer with the PhoneBox agent (Windows, macOS, Linux) | `http://127.0.0.1:8765` (the default) | Not needed |
 | WSL2 with mirrored networking | `http://127.0.0.1:8765` (the default) | Not needed |
-| WSL2 with NAT networking (WSL's default) | `https://<windows-host>:8766` | Needed |
+| WSL2 with NAT networking (WSL's default) | `https://<windows-host>:1766` | Needed |
 
 In WSL2, `wslinfo --networking-mode` prints `mirrored` or `nat`. Mirrored networking (Windows 11 22H2 or later: set
 `networkingMode=mirrored` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, then run `wsl --shutdown`) is the simplest:
@@ -91,7 +91,7 @@ over HTTPS and with the webhook key. That key opens only the webhook endpoints, 
 4. Add to `~/.bashrc` (or the profile of the shell you start Copilot CLI from), then open a new terminal:
 
    ```sh
-   export PHONEBOX_URL="https://$(ip route show default | awk '{print $3; exit}'):8766"   # Windows as seen from WSL
+   export PHONEBOX_URL="https://$(ip route show default | awk '{print $3; exit}'):1766"   # Windows as seen from WSL
    export PHONEBOX_CERT_SHA256="<the fingerprint>"
    ```
 

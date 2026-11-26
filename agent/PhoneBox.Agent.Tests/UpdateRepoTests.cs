@@ -31,6 +31,7 @@ public sealed class LanAdvertiseTests
         Assert.True(Lan.IsAdvertiseHost("203.0.113.10"));
         Assert.True(Lan.IsAdvertiseHost("home.example.com"));
         Assert.True(Lan.IsAdvertiseHost("desk.tail1234.ts.net"));
+        Assert.True(Lan.IsAdvertiseHost("vpn2-g-tech.tech"));
         Assert.True(Lan.IsAdvertiseHost("192.168.1.10"));
         Assert.False(Lan.IsAdvertiseHost("127.0.0.1"));
         Assert.False(Lan.IsAdvertiseHost("localhost"));
@@ -43,5 +44,20 @@ public sealed class LanAdvertiseTests
     {
         var list = Lan.NormalizeAdvertiseHosts(["home.example.com", " home.example.com ", "203.0.113.10", "127.0.0.1", "a,b"]);
         Assert.Equal(["home.example.com", "203.0.113.10", "a", "b"], list);
+    }
+
+    [Fact]
+    public void AdvertisedHostsPutsUserRemoteHostsFirst()
+    {
+        var lan = new LanConfig
+        {
+            Enabled = true,
+            Port = 1766,
+            AdvertiseHosts = ["vpn2-g-tech.tech", "192.168.1.10"],
+        };
+        var hosts = Lan.AdvertisedHosts(lan);
+        Assert.Equal("vpn2-g-tech.tech", hosts[0]);
+        Assert.Contains("vpn2-g-tech.tech", hosts);
+        Assert.True(hosts.Count <= 8);
     }
 }
