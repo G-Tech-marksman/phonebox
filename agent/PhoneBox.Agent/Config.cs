@@ -312,9 +312,8 @@ public sealed class DisplayConfig
 public sealed class LanConfig
 {
     /// <summary>
-    /// Fixed Wi-Fi / Tailscale / VPN listen port for this fork. Older configs with 8766 (or any other value) are
-    /// rewritten to this on load. The local Settings page stays on loopback <c>8765</c> (HTTP); this port is HTTPS
-    /// pairing only.
+    /// Fixed port for this fork: local Settings HTTP (<c>http://127.0.0.1:1766</c>) and Wi-Fi/VPN HTTPS (non-loopback
+    /// NICs). Older configs with 8766 (or any other <c>lan.port</c>) are rewritten to this on load.
     /// </summary>
     public const int FixedPort = 1766;
 

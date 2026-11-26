@@ -43,7 +43,8 @@ AppPaths.RestrictConfig(configPath);
 var configStore = new ConfigStore(configPath);
 configStore.PersistGenerated(); // keep the Wi-Fi token stable across restarts
 var lanCfg = configStore.Get().Lan;
-var lanCert = lanCfg.Enabled && lanCfg.Port != Port ? Lan.Certificate(configDir) : null;
+// Wi-Fi HTTPS can share the Settings TCP port: HTTP stays on 127.0.0.1, HTTPS binds non-loopback NICs only.
+var lanCert = lanCfg.Enabled ? Lan.Certificate(configDir) : null;
 // USB uses the same certificate as Wi-Fi; the agent hands its fingerprint to the app over adb (see UsbLink.cs)
 var usbCert = lanCert ?? Lan.Certificate(configDir);
 var usb = new UsbLink(UsbLink.FreeLoopbackPort(), Lan.Fingerprint(usbCert));
@@ -58,11 +59,23 @@ builder.WebHost.ConfigureKestrel(k =>
     // a dictation travels in the query (the phone's transport sends no request bodies): 1000 characters of any script,
     // percent-encoded, fit in 16 KB
     k.Limits.MaxRequestLineSize = 16 * 1024;
+    // Settings + hooks: HTTP on loopback (default port 1766 — same number as Wi-Fi / VPN pairing).
     k.Listen(IPAddress.Loopback, Port);
     // USB: the end of the phone's adb reverse tunnel, on a port of its own, over TLS the app pins, with the app's key
     k.Listen(IPAddress.Loopback, usb.Port, l => l.UseHttps(usbCert));
-    // Wi-Fi / Tailscale: HTTPS with a pinned self-signed certificate, token required (see Lan.cs).
-    if (lanCert is not null) k.Listen(IPAddress.Any, lanCfg.Port, l => l.UseHttps(lanCert));
+    // Wi-Fi / Tailscale / VPN: HTTPS with a pinned self-signed certificate, token required (see Lan.cs).
+    // When lan.port == Settings port, bind each non-loopback IPv4 (not 0.0.0.0) so HTTP Settings can keep 127.0.0.1.
+    if (lanCert is not null)
+    {
+        if (lanCfg.Port == Port)
+        {
+            // Same TCP port as Settings HTTP: HTTPS only on non-loopback IPv4s (not 0.0.0.0).
+            foreach (var ip in Lan.WifiBindAddresses())
+                k.Listen(ip, lanCfg.Port, l => l.UseHttps(lanCert));
+        }
+        else
+            k.Listen(IPAddress.Any, lanCfg.Port, l => l.UseHttps(lanCert));
+    }
 });
 builder.Logging.ClearProviders();
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
@@ -241,12 +254,13 @@ app.Use(async (ctx, next) =>
 app.MapGet("/api/latency", () => Results.Json(timings.Summary()));
 
 // Security:
-//  - Local port 8765 listens on 127.0.0.1 only; the Host check blocks DNS rebinding. From browsers only the settings
-//    page itself (same origin) is accepted (no CSRF).
+//  - Local Settings HTTP listens on 127.0.0.1 only (default port 1766); the Host check blocks DNS rebinding. From
+//    browsers only the settings page itself (same origin) is accepted (no CSRF).
 //  - The phone's USB tunnel ends on a port of its own (UsbLink): every app on the phone can reach the tunnel, so it
 //    is TLS with the certificate the app pins (handed over adb), needs the key the PhoneBox app made (read over adb),
 //    and serves only the phone API.
-//  - The optional Wi-Fi port only serves the phone API, only over TLS, and only with the paired token.
+//  - The optional Wi-Fi listener serves the phone API over TLS with the paired token (same TCP port as Settings when
+//    both use 1766: HTTPS on non-loopback NICs only).
 app.UseWebSockets();
 app.UseRouting();
 app.Use(async (ctx, next) =>
@@ -494,8 +508,7 @@ app.MapPut("/api/settings", async (HttpRequest req, ConfigStore cfg, ControlDeck
     using var r = new StreamReader(req.Body);
     long? expected = long.TryParse(req.Headers["X-Config-Version"], out var v) ? v : null; // scripts may leave it out
     var body = await r.ReadToEndAsync();
-    if (LanPortCollidesWithLocal(body, Port))
-        return Results.BadRequest(new { error = $"Wi-Fi port cannot be the same as the local port ({Port})" });
+    // Same TCP port for Settings HTTP (loopback) and Wi-Fi HTTPS (non-loopback) is intentional on this fork.
     if (LanKeysShared(body))
         return Results.BadRequest(new { error = "The Wi-Fi key and the webhook key must be different: make a new key for one of them" });
     AgentConfig? proposed = null;
@@ -1267,8 +1280,18 @@ app.MapDelete("/api/settings/shortcut-icon", (string id, HttpRequest req, Config
 });
 
 app.Lifetime.ApplicationStarted.Register(() =>
+{
     app.Logger.LogInformation("PhoneBox agent {Version} ready on http://127.0.0.1:{Port}, phone USB port {UsbPort} (config: {Path})",
-        AppPaths.Version, Port, usb.Port, configPath));
+        AppPaths.Version, Port, usb.Port, configPath);
+    if (lanCert is not null && lanCfg.Port == Port)
+    {
+        var nics = Lan.WifiBindAddresses();
+        if (nics.Count == 0)
+            app.Logger.LogWarning("Wi-Fi is on but no non-loopback IPv4 was found to bind HTTPS :{Port}; Settings HTTP is on 127.0.0.1:{Port}. Connect a network or restart after VPN is up.", Port, Port);
+        else
+            app.Logger.LogInformation("Wi-Fi / VPN HTTPS on port {Port} bound to: {Addresses}", Port, string.Join(", ", nics));
+    }
+});
 
 // macOS, running as PhoneBox.app: the main thread belongs to the menu bar icon and the host runs beside it (MenuBarHost)
 if (!MenuBarHost.TryRun(app, args, endpoint, configDir)) app.Run();

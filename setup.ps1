@@ -16,7 +16,7 @@
   With options (must use scriptblock form; plain iex cannot pass parameters):
 
     & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -NoPhone
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.5
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/main/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.6
 
   Or set $env:PHONEBOX_REPO = 'G-Tech-marksman/phonebox' before running.
 
@@ -64,8 +64,8 @@ if ($Repo -match '^https?://github\.com/([^/]+)/([^/#?]+)') { $Repo = "$($Matche
 $Repo = $Repo.Trim().Trim('/')
 if ($Repo -notmatch '^[^/\s]+/[^/\s]+$') { throw "Invalid -Repo '$Repo' (expected owner/name, for example G-Tech-marksman/phonebox)." }
 $Package = 'net.oxog.phonebox.deskpanel'
-# Local Settings UI (HTTP loopback). Wi-Fi / pairing HTTPS listen port is fixed at 1766 (see Force-LanPort).
-$SettingsUrl = 'http://127.0.0.1:8765'
+# Settings HTTP + Wi-Fi/VPN pairing share TCP 1766 (HTTP on 127.0.0.1; HTTPS on other NICs).
+$SettingsUrl = 'http://127.0.0.1:1766'
 $LanPort = 1766
 
 function Write-Step([string]$Text) { Write-Host ''; Write-Host "==> $Text" -ForegroundColor Cyan }
@@ -316,7 +316,7 @@ function Force-LanPort {
         $json = $obj | ConvertTo-Json -Depth 100
         Set-Content -LiteralPath $config -Value $json -Encoding UTF8
         if ($null -eq $prev) { Write-Ok "Set Wi-Fi listen port to $LanPort in config.json" }
-        else { Write-Ok "Migrated Wi-Fi listen port $prev → $LanPort in config.json (Settings UI stays at $SettingsUrl)" }
+        else { Write-Ok "Migrated lan.port $prev → $LanPort in config.json (Settings + Wi-Fi use $SettingsUrl / TCP $LanPort)" }
     } catch {
         Write-Caution "Could not rewrite lan.port in config.json: $($_.Exception.Message). The agent still forces $LanPort on startup."
     }
@@ -456,9 +456,9 @@ function Install-PhoneBox {
             }
         }
 
-        $owner = Get-PortOwner 8765
+        $owner = Get-PortOwner $LanPort
         if ($owner -and $owner -ne 'PhoneBoxAgent' -and $owner -ne 'DeskAgent') {
-            Write-Caution "Port 8765 is used by $owner. PhoneBox needs this port; close $owner or PhoneBox will not start."
+            Write-Caution "Port $LanPort is used by $owner. PhoneBox needs this port for Settings and Wi-Fi; close $owner or PhoneBox will not start."
         }
 
         if ($DryRun) {

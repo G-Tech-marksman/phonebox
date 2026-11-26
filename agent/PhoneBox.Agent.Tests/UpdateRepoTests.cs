@@ -63,6 +63,18 @@ public sealed class LanAdvertiseTests
     }
 
     [Fact]
+    public void WifiBindAddressesOmitsLoopbackAndLinkLocal()
+    {
+        foreach (var ip in Lan.WifiBindAddresses())
+        {
+            Assert.Equal(System.Net.Sockets.AddressFamily.InterNetwork, ip.AddressFamily);
+            var b = ip.GetAddressBytes();
+            Assert.NotEqual(127, b[0]);
+            Assert.False(b[0] == 169 && b[1] == 254);
+        }
+    }
+
+    [Fact]
     public void PersistGeneratedMigratesLegacyLanPortToFixed1766()
     {
         var dir = Directory.CreateTempSubdirectory("phonebox-lan-port-").FullName;

@@ -63,6 +63,33 @@ public static class Lan
     }
 
     /// <summary>
+    /// IPv4 addresses (non-loopback, non-link-local) to bind the Wi-Fi HTTPS listener on when Settings HTTP already
+    /// owns <c>127.0.0.1:&lt;port&gt;</c> on the same port. Includes LAN, Tailscale, VPN, and public NIC addresses so
+    /// port-forward / VPN paths still reach the agent without binding <c>0.0.0.0</c> (which would conflict with loopback HTTP).
+    /// </summary>
+    public static IReadOnlyList<IPAddress> WifiBindAddresses()
+    {
+        var list = new List<IPAddress>();
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+            var desc = ni.Description + " " + ni.Name;
+            var isTailscale = desc.Contains("Tailscale", StringComparison.OrdinalIgnoreCase);
+            var props = ni.GetIPProperties();
+            var hasGateway = props.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
+            if (!isTailscale && ShouldSkipAdapter(desc, hasGateway)) continue;
+            foreach (var ua in props.UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                var b = ua.Address.GetAddressBytes();
+                if (b[0] == 127 || (b[0] == 169 && b[1] == 254)) continue;
+                list.Add(ua.Address);
+            }
+        }
+        return list.Distinct().ToList();
+    }
+
+    /// <summary>
     /// Hosts put in the pairing payload. User-typed <see cref="LanConfig.AdvertiseHosts"/> (public IP, DDNS,
     /// MagicDNS, VPN hostname) come first so they are never truncated by many LAN adapters and so a phone on VPN
     /// tries the remote name before private IPs it cannot reach.

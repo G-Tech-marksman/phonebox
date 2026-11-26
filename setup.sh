@@ -7,7 +7,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 # With options:
 #   curl -fsSL .../setup.sh | bash -s -- --no-phone
-#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.5
+#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.6
 # Or: export PHONEBOX_REPO=G-Tech-marksman/phonebox
 #
 # Run it as yourself, not with sudo: it asks for sudo only to install packages, and asks first.
@@ -27,7 +27,7 @@ set -euo pipefail
 
 repo="${PHONEBOX_REPO:-G-Tech-marksman/phonebox}"
 package="net.oxog.phonebox.deskpanel"
-settings_url="http://127.0.0.1:8765"
+settings_url="http://127.0.0.1:1766"
 lan_port=1766
 
 yes=0; phone=1; serial=""; autostart=1; start=1; extras=1; version=""; dry=0
