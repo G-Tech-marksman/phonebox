@@ -76,13 +76,25 @@ To pass options:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -NoPhone
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Repo G-Tech-marksman/phonebox -Version 0.9.29-gtech.2
 ```
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash -s -- --no-phone
 curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash -s -- --repo G-Tech-marksman/phonebox
 ```
+
+<details><summary><b>Repair after a bad install (Windows)</b></summary>
+
+If setup finished but the agent never answered (`agent.log` under `%LOCALAPPDATA%\PhoneBox`), re-run setup so it replaces the app with the latest fork release (needs **v0.9.29-gtech.2** or newer — that zip is the real Windows WinForms/`WinExe` build):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.ps1))) -Yes -Version 0.9.29-gtech.2
+```
+
+Then open http://127.0.0.1:8765. If it still fails, open `%LOCALAPPDATA%\PhoneBox\agent.log` and paste the **last ~40 lines** (especially any `Exception` / `fail` / `error` lines). Also confirm Explorer shows `PhoneBoxAgent.exe` still under `%LOCALAPPDATA%\PhoneBox\app` (antivirus sometimes deletes it).
+
+</details>
 
 </details>
 

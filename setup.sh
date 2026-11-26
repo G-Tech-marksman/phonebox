@@ -7,7 +7,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/G-Tech-marksman/phonebox/cursor/apk-manual-pair-link-3124/setup.sh | bash
 # With options:
 #   curl -fsSL .../setup.sh | bash -s -- --no-phone
-#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.1
+#   curl -fsSL .../setup.sh | bash -s -- --repo G-Tech-marksman/phonebox --version 0.9.29-gtech.2
 # Or: export PHONEBOX_REPO=G-Tech-marksman/phonebox
 #
 # Run it as yourself, not with sudo: it asks for sudo only to install packages, and asks first.
